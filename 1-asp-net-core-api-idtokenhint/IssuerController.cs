@@ -93,6 +93,18 @@ namespace AspNetCoreVerifiableCredentials
         [HttpGet("/api/issuer/issuance-request")]
         public async Task<ActionResult> IssuanceRequest()
         {
+    // Aya Living: prevent credential issuance until
+    // employee identity and authorization are verified.
+    if (!_configuration.GetValue<bool>(
+        "Aya:IssuanceEnabled", false))
+    {
+        return StatusCode(503, new
+        {
+            error = "issuance_disabled",
+            message = "Aya employee ID issuance is not yet enabled."
+        });
+    }
+
             _log.LogTrace( this.HttpContext.Request.GetDisplayUrl() );
             try
             {
