@@ -138,6 +138,35 @@ if (requestType != RequestType.Selfie)
         public ActionResult RequestStatus() {
             _log.LogTrace( this.Request.GetDisplayUrl() );
             try {
+string principalId = Request.Headers[
+    "X-MS-CLIENT-PRINCIPAL-ID"].ToString();
+
+if (string.IsNullOrWhiteSpace(principalId) ||
+    string.IsNullOrWhiteSpace(Request.Headers[
+        "X-MS-CLIENT-PRINCIPAL"].ToString()))
+{
+    return Unauthorized();
+}
+
+string state = Request.Query["id"].ToString();
+
+if (string.IsNullOrWhiteSpace(state) ||
+    !_cache.TryGetValue(state, out string cached))
+{
+    return NotFound();
+}
+
+JObject requestState = JObject.Parse(cached);
+
+if (requestState.Value<string>("kind") != "issuance" ||
+    !string.Equals(
+        requestState.Value<string>("ownerPrincipalId"),
+        principalId,
+        StringComparison.Ordinal))
+{
+    return NotFound();
+}
+[NonAction]
                 if (! PollRequestStatus( out JObject response )) {
                     return BadRequest( new { error = "400", error_description = JsonConvert.SerializeObject( response ) } );
                 }
