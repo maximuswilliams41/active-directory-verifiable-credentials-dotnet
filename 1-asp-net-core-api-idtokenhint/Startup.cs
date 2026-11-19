@@ -94,8 +94,6 @@ services.AddAntiforgery(options =>
                 endpoints.MapRazorPages();
             });
 
-            // generate an api-key on startup that we can use to validate callbacks
-            System.Environment.SetEnvironmentVariable("API-KEY", Guid.NewGuid().ToString());
         }
     }
 }
