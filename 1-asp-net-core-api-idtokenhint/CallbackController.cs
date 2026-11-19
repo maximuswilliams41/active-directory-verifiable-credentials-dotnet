@@ -23,6 +23,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Extensions;
 using Azure.Core;
 using Microsoft.AspNetCore.Http;
+using System.Security.Cryptography;
 
 namespace AspNetCoreVerifiableCredentials
 {
@@ -45,16 +46,38 @@ namespace AspNetCoreVerifiableCredentials
             _configuration = configuration;
             _cache = memoryCache;
             _log = log;
-            _apiKey = System.Environment.GetEnvironmentVariable("API-KEY");
+            
+_apiKey = _configuration["Aya:CallbackApiKey"];
+
         }
 
-        private async Task<ActionResult> HandleRequestCallback( RequestType requestType, string body ) {
+        private async Task<ActionResult> ( RequestType requestType, string body ) {
             try {
-                this.Request.Headers.TryGetValue( "api-key", out var apiKey );
-                if (requestType != RequestType.Selfie && this._apiKey != apiKey) {
-                    _log.LogTrace( "api-key wrong or missing" );
-                    return new ContentResult() { StatusCode = (int)HttpStatusCode.Unauthorized, Content = "api-key wrong or missing" };
-                }
+                
+if (requestType != RequestType.Selfie)
+{
+    string suppliedKey =
+        Request.Headers["api-key"].ToString();
+
+    if (string.IsNullOrWhiteSpace(_apiKey) ||
+        string.IsNullOrWhiteSpace(suppliedKey))
+    {
+        return Unauthorized();
+    }
+
+    byte[] expected = SHA256.HashData(
+        Encoding.UTF8.GetBytes(_apiKey));
+
+    byte[] received = SHA256.HashData(
+        Encoding.UTF8.GetBytes(suppliedKey));
+
+    if (!CryptographicOperations.FixedTimeEquals(
+        expected, received))
+    {
+        return Unauthorized();
+    }
+}
+
                 if ( body == null) {
                     body = await new System.IO.StreamReader( this.Request.Body ).ReadToEndAsync();
                     _log.LogTrace( body );
@@ -111,7 +134,6 @@ namespace AspNetCoreVerifiableCredentials
             return await HandleRequestCallback( RequestType.Presentation, null );
         }
 
-        [AllowAnonymous]
         [HttpGet( "/api/request-status" )]
         public ActionResult RequestStatus() {
             _log.LogTrace( this.Request.GetDisplayUrl() );
