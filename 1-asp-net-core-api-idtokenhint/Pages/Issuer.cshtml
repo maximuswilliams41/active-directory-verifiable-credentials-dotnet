@@ -25,6 +25,10 @@
             <div id="message"></div>
         </div>
 
+<form id="aya-antiforgery" method="post" style="display:none">
+    @Html.AntiForgeryToken()
+</form>
+
         <button type="button" id="issue-credential" class="button bg-nw-purple text-nw-white">Issue Credential</button>
         <button type="button" id="check-result" class="button bg-nw-purple text-nw-white" style="display:none">Check Result</button>
         <button type="button" id="take-selfie" class="button bg-nw-purple text-nw-white" style="display:none">Take Selfie</button>
