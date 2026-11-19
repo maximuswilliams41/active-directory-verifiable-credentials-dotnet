@@ -51,7 +51,9 @@ public class IssuerController : ControllerBase
             _configuration = configuration;
             _httpClientFactory = httpClientFactory;
             _ayaClaims = ayaClaims;
-            _apiKey = System.Environment.GetEnvironmentVariable("API-KEY");
+            
+_apiKey = _configuration["Aya:CallbackApiKey"];
+
         }
 
         private async Task<IssuanceRequest> SetClaimsAsync(
@@ -93,7 +95,23 @@ public async Task<ActionResult> IssuanceRequest()
             error = "issuance_disabled",
             message = "Aya employee ID issuance is not yet enabled."
         });
-    }
+    }if (string.IsNullOrWhiteSpace(_apiKey))
+{
+    return StatusCode(503, new
+    {
+        error = "callback_not_configured"
+    });
+}
+
+string ownerPrincipalId = Request.Headers[
+    "X-MS-CLIENT-PRINCIPAL-ID"].ToString();
+
+if (string.IsNullOrWhiteSpace(ownerPrincipalId) ||
+    string.IsNullOrWhiteSpace(Request.Headers[
+        "X-MS-CLIENT-PRINCIPAL"].ToString()))
+{
+    return Unauthorized();
+}
 
             _log.LogTrace( this.HttpContext.Request.GetDisplayUrl() );
             try
