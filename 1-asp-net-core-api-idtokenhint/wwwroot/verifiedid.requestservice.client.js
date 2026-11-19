@@ -6,14 +6,6 @@ function RequestService(onDrawQRCode, onNavigateToDeepLink, onRequestRetrieved, 
     this.onIssuanceSuccesful = onIssuanceSuccesful;
     this.onSelfieTaken = onSelfieTaken;
     this.onError = onError; 
-this.onError(
-    this.requestType,
-    respJson.error_description ||
-    respJson.message ||
-    respJson.error ||
-    `HTTP ${response.status}`
-);
-
     this.pollFrequency = (pollFrequency == undefined ? 1000 : pollFrequency);
     this.apiCreateIssuanceRequest = '/api/issuer/issuance-request';
     this.apiSetPhoto = '/api/issuer/userphoto';
@@ -67,9 +59,17 @@ const response = await fetch(url, {
 
         const respJson = await response.json();
         console.log(respJson);
-        if (!response.ok || respJson.error || respJson.error_description) {
-            this.onError(this.requestType, respJson.error_description);
-        } else {
+        
+if (!response.ok || respJson.error || respJson.error_description) {
+    this.onError(
+        this.requestType,
+        respJson.error_description ||
+        respJson.message ||
+        respJson.error ||
+        `HTTP ${response.status}`
+    );
+} else {
+
             this.request = respJson;
             if (/Android/i.test(navigator.userAgent) || /iPhone/i.test(navigator.userAgent)) {
                 this.log(`Mobile device (${navigator.userAgent})! Using deep link (${respJson.url}).`);
