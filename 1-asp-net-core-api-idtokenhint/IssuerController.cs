@@ -36,19 +36,23 @@ namespace AspNetCoreVerifiableCredentials
         private IConfiguration _configuration;
         private readonly AyaEmployeeClaimsService _ayaClaims;
         private string _apiKey;
-        public IssuerController(
+        private readonly AyaEmployeeClaimsService _ayaClaims;
+        
+public IssuerController(
     IConfiguration configuration,
     IMemoryCache memoryCache,
     ILogger<IssuerController> log,
     IHttpClientFactory httpClientFactory,
     AyaEmployeeClaimsService ayaClaims)
-        {
-            _cache = memoryCache;
-            _log = log;
-            _configuration = configuration;
-            _httpClientFactory = httpClientFactory;
-            _apiKey = System.Environment.GetEnvironmentVariable("API-KEY");
-        }
+{
+    _cache = memoryCache;
+    _log = log;
+    _configuration = configuration;
+    _httpClientFactory = httpClientFactory;
+    _ayaClaims = ayaClaims;
+    _apiKey = System.Environment.GetEnvironmentVariable("API-KEY");
+}
+
 
         
 private async Task<IssuanceRequest> SetClaimsAsync(
