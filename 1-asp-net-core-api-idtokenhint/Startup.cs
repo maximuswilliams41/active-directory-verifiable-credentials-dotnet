@@ -56,6 +56,8 @@ namespace AspNetCoreVerifiableCredentials
             services.AddRazorPages();
             services.AddHttpClient();  // use iHttpFactory as best practice, should be easy to use extra retry and hold off policies in the future
         }
+            services.AddScoped<AyaEmployeeClaimsService>();
+
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
