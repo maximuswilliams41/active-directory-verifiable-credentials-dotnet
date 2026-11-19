@@ -5,7 +5,15 @@ function RequestService(onDrawQRCode, onNavigateToDeepLink, onRequestRetrieved, 
     this.onPresentationVerified = onPresentationVerified;
     this.onIssuanceSuccesful = onIssuanceSuccesful;
     this.onSelfieTaken = onSelfieTaken;
-    this.onError = onError;
+    this.onError = onError; 
+this.onError(
+    this.requestType,
+    respJson.error_description ||
+    respJson.message ||
+    respJson.error ||
+    `HTTP ${response.status}`
+);
+
     this.pollFrequency = (pollFrequency == undefined ? 1000 : pollFrequency);
     this.apiCreateIssuanceRequest = '/api/issuer/issuance-request';
     this.apiSetPhoto = '/api/issuer/userphoto';
