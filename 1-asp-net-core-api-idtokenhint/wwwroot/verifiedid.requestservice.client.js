@@ -28,10 +28,38 @@ function RequestService(onDrawQRCode, onNavigateToDeepLink, onRequestRetrieved, 
 
     // function to create a presentation request
     this.createRequest = async function (url) {
-        const response = await fetch(url, {method: 'GET', headers: { 'Accept': 'application/json', 'rsid': this.uuid } });
+        
+const isIssuance = url === this.apiCreateIssuanceRequest;
+
+const headers = {
+    'Accept': 'application/json',
+    'rsid': this.uuid
+};
+
+if (isIssuance) {
+    const csrfToken = document.querySelector(
+        'input[name="__RequestVerificationToken"]'
+    )?.value;
+
+    if (!csrfToken) {
+        this.onError(this.requestType, {
+            error_description: 'Missing request verification token'
+        });
+        return;
+    }
+
+    headers['RequestVerificationToken'] = csrfToken;
+}
+
+const response = await fetch(url, {
+    method: isIssuance ? 'POST' : 'GET',
+    credentials: 'same-origin',
+    headers: headers
+});
+
         const respJson = await response.json();
         console.log(respJson);
-        if (respJson.error_description) {
+        if (!response.ok || respJson.error || respJson.error_description) {
             this.onError(this.requestType, respJson.error_description);
         } else {
             this.request = respJson;
