@@ -31,70 +31,38 @@ namespace AspNetCoreVerifiableCredentials
 [ApiController]
 public class IssuerController : ControllerBase
 {
-    protected IMemoryCache _cache;
-    protected readonly ILogger<IssuerController> _log;
-    private IHttpClientFactory _httpClientFactory;
-    private IConfiguration _configuration;
-    private readonly AyaEmployeeClaimsService _ayaClaims;
-    private string _apiKey;
+    
+        protected IMemoryCache _cache;
+        protected readonly ILogger<IssuerController> _log;
+        private IHttpClientFactory _httpClientFactory;
+        private IConfiguration _configuration;
+        private readonly AyaEmployeeClaimsService _ayaClaims;
+        private string _apiKey;
 
-    public IssuerController(
-        IConfiguration configuration,
-        IMemoryCache memoryCache,
-        ILogger<IssuerController> log,
-        IHttpClientFactory httpClientFactory,
-        AyaEmployeeClaimsService ayaClaims)
-    {
-        _cache = memoryCache;
-        _log = log;
-        _configuration = configuration;
-        _httpClientFactory = httpClientFactory;
-        _ayaClaims = ayaClaims;
-        _apiKey = System.Environment.GetEnvironmentVariable("API-KEY");
-    }
+        public IssuerController(
+            IConfiguration configuration,
+            IMemoryCache memoryCache,
+            ILogger<IssuerController> log,
+            IHttpClientFactory httpClientFactory,
+            AyaEmployeeClaimsService ayaClaims)
+        {
+            _cache = memoryCache;
+            _log = log;
+            _configuration = configuration;
+            _httpClientFactory = httpClientFactory;
+            _ayaClaims = ayaClaims;
+            _apiKey = System.Environment.GetEnvironmentVariable("API-KEY");
+        }
 
+        private async Task<IssuanceRequest> SetClaimsAsync(
+            IssuanceRequest request)
+        {
+            request.claims = await _ayaClaims.GetClaimsAsync(
+                HttpContext);
 
-
-        
-private async Task<IssuanceRequest> SetClaimsAsync(
-    IssuanceRequest request)
-{
-    request.claims = await _ayaClaims.GetClaimsAsync(
-        HttpContext);
-
-    return request;
-}
- {
-            request.claims = new Dictionary<string, string>();
-            request.claims.Add( "given_name", "Megan" );
-            request.claims.Add( "family_name", "Bowen" );
-
-            string photoClaimName = "";
-            // get photo claim from manifest
-            if (GetCredentialManifest( out string manifest, out string error )) {
-                JObject jsonManifest = JObject.Parse(manifest);
-                foreach( var claim in jsonManifest["display"]["claims"] ) {
-                    string claimName = ((JProperty)claim).Name;                    
-                    if (jsonManifest["display"]["claims"][claimName]["type"].ToString() == "image/jpg;base64url" ) {
-                        photoClaimName = claimName.Replace( "vc.credentialSubject.", "");
-                    }
-                }
-            }
-            if (!string.IsNullOrWhiteSpace( photoClaimName) ) {
-                // if we have a photoId in the Session
-                string photoId = this.Request.Headers["rsid"];
-                if ( !string.IsNullOrWhiteSpace(photoId) ) {
-                    // if we have a photo in-mem cache
-                    if ( _cache.TryGetValue( photoId, out string photo ) ) {
-                        _log.LogTrace( $"Adding user photo to credential. photoId: {photoId}");
-                        request.claims.Add( photoClaimName, photo );
-                    } else {
-                        _log.LogTrace( $"Couldn't find a user photo to add to credential. photoId: {photoId}" );
-                    }
-                }
-            }
             return request;
         }
+
 
         public static string Sha256Hash( string source ) {
             string hash = null;
@@ -157,7 +125,9 @@ private async Task<IssuanceRequest> SetClaimsAsync(
 
                     // If the credential uses the idTokenHint attestation flow, then you must set the claims before
                     // calling the Request Service API
-                    request = await SetClaimsAsync(request); request );
+                    
+request = await SetClaimsAsync(request);
+
 
                     string jsonString = JsonConvert.SerializeObject( request, Newtonsoft.Json.Formatting.None, new JsonSerializerSettings {
                         NullValueHandling = NullValueHandling.Ignore
