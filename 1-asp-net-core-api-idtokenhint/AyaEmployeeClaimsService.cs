@@ -56,6 +56,27 @@ namespace AspNetCoreVerifiableCredentials
                 throw new UnauthorizedAccessException(
                     "Entra object ID not available.");
 
+            // Aya Living: require explicit permission to
+            // request an employee identification credential.
+            bool authorized = entries?
+                .OfType<JObject>()
+                .Any(c =>
+                    (
+                        c.Value<string>("typ") == "roles" ||
+                        c.Value<string>("typ") == "role" ||
+                        c.Value<string>("typ") ==
+                        "http://schemas.microsoft.com/ws/2008/06/identity/claims/role"
+                    ) &&
+                    c.Value<string>("val") ==
+                        "Aya.EmployeeID.Request"
+                ) == true;
+
+            if (!authorized)
+            {
+                throw new UnauthorizedAccessException(
+                    "Employee is not authorized to request an Aya ID.");
+            }
+
             // Graph returns the authenticated user's record.
             string url =
                 "https://graph.microsoft.com/v1.0/me" +
