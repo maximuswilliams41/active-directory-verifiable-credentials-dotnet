@@ -26,32 +26,33 @@ using Microsoft.AspNetCore.Http;
 
 namespace AspNetCoreVerifiableCredentials
 {
-    [Route("api/[controller]/[action]")]
-    [ApiController]
-    public class IssuerController : ControllerBase
-    {
-        protected IMemoryCache _cache;
-        protected readonly ILogger<IssuerController> _log;
-        private IHttpClientFactory _httpClientFactory;
-        private IConfiguration _configuration;
-        private readonly AyaEmployeeClaimsService _ayaClaims;
-        private string _apiKey;
-        private readonly AyaEmployeeClaimsService _ayaClaims;
-        
-public IssuerController(
-    IConfiguration configuration,
-    IMemoryCache memoryCache,
-    ILogger<IssuerController> log,
-    IHttpClientFactory httpClientFactory,
-    AyaEmployeeClaimsService ayaClaims)
+   
+[Route("api/[controller]/[action]")]
+[ApiController]
+public class IssuerController : ControllerBase
 {
-    _cache = memoryCache;
-    _log = log;
-    _configuration = configuration;
-    _httpClientFactory = httpClientFactory;
-    _ayaClaims = ayaClaims;
-    _apiKey = System.Environment.GetEnvironmentVariable("API-KEY");
-}
+    protected IMemoryCache _cache;
+    protected readonly ILogger<IssuerController> _log;
+    private IHttpClientFactory _httpClientFactory;
+    private IConfiguration _configuration;
+    private readonly AyaEmployeeClaimsService _ayaClaims;
+    private string _apiKey;
+
+    public IssuerController(
+        IConfiguration configuration,
+        IMemoryCache memoryCache,
+        ILogger<IssuerController> log,
+        IHttpClientFactory httpClientFactory,
+        AyaEmployeeClaimsService ayaClaims)
+    {
+        _cache = memoryCache;
+        _log = log;
+        _configuration = configuration;
+        _httpClientFactory = httpClientFactory;
+        _ayaClaims = ayaClaims;
+        _apiKey = System.Environment.GetEnvironmentVariable("API-KEY");
+    }
+
 
 
         
