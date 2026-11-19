@@ -34,8 +34,14 @@ namespace AspNetCoreVerifiableCredentials
         protected readonly ILogger<IssuerController> _log;
         private IHttpClientFactory _httpClientFactory;
         private IConfiguration _configuration;
+        private readonly AyaEmployeeClaimsService _ayaClaims;
         private string _apiKey;
-        public IssuerController(IConfiguration configuration, IMemoryCache memoryCache, ILogger<IssuerController> log, IHttpClientFactory httpClientFactory)
+        public IssuerController(
+    IConfiguration configuration,
+    IMemoryCache memoryCache,
+    ILogger<IssuerController> log,
+    IHttpClientFactory httpClientFactory,
+    AyaEmployeeClaimsService ayaClaims)
         {
             _cache = memoryCache;
             _log = log;
@@ -44,7 +50,16 @@ namespace AspNetCoreVerifiableCredentials
             _apiKey = System.Environment.GetEnvironmentVariable("API-KEY");
         }
 
-        private IssuanceRequest SetClaims( IssuanceRequest request ) {
+        
+private async Task<IssuanceRequest> SetClaimsAsync(
+    IssuanceRequest request)
+{
+    request.claims = await _ayaClaims.GetClaimsAsync(
+        HttpContext);
+
+    return request;
+}
+ {
             request.claims = new Dictionary<string, string>();
             request.claims.Add( "given_name", "Megan" );
             request.claims.Add( "family_name", "Bowen" );
@@ -137,7 +152,7 @@ namespace AspNetCoreVerifiableCredentials
 
                     // If the credential uses the idTokenHint attestation flow, then you must set the claims before
                     // calling the Request Service API
-                    SetClaims( request );
+                    request = await SetClaimsAsync(request); request );
 
                     string jsonString = JsonConvert.SerializeObject( request, Newtonsoft.Json.Formatting.None, new JsonSerializerSettings {
                         NullValueHandling = NullValueHandling.Ignore
