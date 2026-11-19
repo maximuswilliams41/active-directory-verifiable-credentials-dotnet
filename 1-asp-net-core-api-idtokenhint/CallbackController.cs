@@ -167,7 +167,7 @@ if (requestState.Value<string>("kind") != "issuance" ||
 {
     return NotFound();
 }
-[NonAction]
+
                 if (! PollRequestStatus( out JObject response )) {
                     return BadRequest( new { error = "400", error_description = JsonConvert.SerializeObject( response ) } );
                 }
@@ -175,7 +175,7 @@ if (requestState.Value<string>("kind") != "issuance" ||
             } catch (Exception ex) {
                 return BadRequest( new { error = "400", error_description = ex.Message } );
             }
-        }
+        }[NonAction]
         public bool PollRequestStatus( out JObject result ) {
             result = null;
             string state = this.Request.Query["id"];
