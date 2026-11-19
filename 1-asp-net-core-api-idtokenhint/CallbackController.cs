@@ -51,7 +51,8 @@ _apiKey = _configuration["Aya:CallbackApiKey"];
 
         }
 
-        private async Task<ActionResult> ( RequestType requestType, string body ) {
+        private async Task<ActionResult> HandleRequestCallback(
+    RequestType requestType, string bod ) {
             try {
                 
 if (requestType != RequestType.Selfie)
