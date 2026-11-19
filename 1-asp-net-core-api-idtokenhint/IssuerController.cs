@@ -77,9 +77,11 @@ public class IssuerController : ControllerBase
         /// This method is called from the UI to initiate the issuance of the verifiable credential
         /// </summary>
         /// <returns>JSON object with the address to the presentation request and optionally a QR code and a state value which can be used to check on the response status</returns>
-        [AllowAnonymous]
-        [HttpGet("/api/issuer/issuance-request")]
-        public async Task<ActionResult> IssuanceRequest()
+        
+[HttpPost("/api/issuer/issuance-request")]
+[ValidateAntiForgeryToken]
+public async Task<ActionResult> IssuanceRequest()
+
         {
     // Aya Living: prevent credential issuance until
     // employee identity and authorization are verified.
