@@ -2,7 +2,7 @@
 
 ## Review scope
 
-This branch starts from main independently of PR #4. It does not merge that PR or add revocation infrastructure. PR #4 retains director review and explicit merge approval. This milestone implements the approved `AyaEmployeeId` type, minimum visible fields, immutable-key mapping, text branding, employee portal flow and synthetic tests. Issuance stays disabled; no Microsoft service was configured or contacted.
+PR #4 was approved and merged into main at `7dfbc1d4bbcab2450ef1325dafac7e356fcaf993`. This branch incorporates that main commit and preserves its revocation simulation, presentation checks and regression tests without extending revocation infrastructure. This milestone implements the approved `AyaEmployeeId` type, minimum visible fields, immutable-key mapping, text branding, employee portal flow and synthetic tests. Issuance stays disabled; no Microsoft service was configured or contacted. PR #5 still requires director review and explicit merge approval.
 
 ## Credential and employee experience
 
@@ -68,4 +68,6 @@ node --test ../tests/Aya.EmployeeId.Ui.Tests/*.test.cjs
 
 Server tests mock Graph, token acquisition and issuance. Browser-flow tests use synthetic fetch responses and a controllable clock. Headless desktop/mobile checks can render the actual disabled `/Issuer` page in an outbound-network-isolated environment. Neither a browser preview nor mocked success demonstrates live Authenticator acceptance.
 
-PR validation has read-only repository permission, no secrets or cloud login, and builds/tests only. Deployment remains manual-only and unchanged. PR #4 must be reviewed independently; its presentation-status hardening and test additions are not silently included in this branch. Reconcile shared test/workflow edits when either branch is eventually merged, with review and CI on the resulting commit.
+Reconciliation validation: SDK 10.0.404; restore and a full non-incremental Release build passed. The combined suite passed 100 .NET tests and 11 employee-flow tests, with zero failures or skips. The .NET suite ran with networking disabled. Restore reports the existing NU1510 redundant Session reference warning; compilation reports the two existing CS8632 nullable-annotation warnings. No regression test was removed.
+
+PR validation has read-only repository permission, no secrets or cloud login, and builds/tests only. Deployment remains manual-only and unchanged. The reconciliation retains both revocation and employee-flow CI path filters, the shared test host's service accessor, and all regression tests from main and PR #5. The complete combined suite must pass locally and in GitHub CI before final review. Microsoft device acceptance remains an owner-only future check, not a result of these synthetic tests.

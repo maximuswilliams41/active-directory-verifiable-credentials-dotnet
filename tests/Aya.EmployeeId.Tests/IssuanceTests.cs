@@ -226,6 +226,7 @@ public sealed class IssuanceTests
         public string ConfiguredKey = CallbackKey;
         public readonly Dictionary<string,string> Overrides = new();
         private IHost _host;
+        internal IServiceProvider Services => _host.Services;
         public IEnumerable<string> Actions() => _host.Services
             .GetRequiredService<Microsoft.AspNetCore.Mvc.Infrastructure.IActionDescriptorCollectionProvider>()
             .ActionDescriptors.Items.OfType<Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor>()
