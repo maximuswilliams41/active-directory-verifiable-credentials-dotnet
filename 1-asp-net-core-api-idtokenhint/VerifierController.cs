@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Identity.Client;
 using Newtonsoft.Json;
@@ -53,7 +53,6 @@ namespace AspNetCoreVerifiableCredentials
         [HttpGet("/api/verifier/presentation-request")]
         public async Task<ActionResult> PresentationRequest()
         {
-            _log.LogTrace( this.Request.GetDisplayUrl() );
             try
             {
                 //The VC Request API is an authenticated API. We need to clientid and secret (or certificate) to create an access token which 
@@ -61,8 +60,8 @@ namespace AspNetCoreVerifiableCredentials
                 var accessToken = await MsalAccessTokenHandler.GetAccessToken( _configuration );
                 if (accessToken.Item1 == String.Empty)
                 {
-                    _log.LogError(String.Format("failed to acquire accesstoken: {0} : {1}"), accessToken.error, accessToken.error_description);
-                    return BadRequest(new { error = accessToken.error, error_description = accessToken.error_description });
+                    _log.LogError("Credential request could not be completed.");
+                    return BadRequest(new { error = accessToken.error, error_description = "Token acquisition failed" });
                 }
 
                 string url = $"{_configuration["VerifiedID:ApiEndpoint"]}createPresentationRequest";
@@ -96,7 +95,6 @@ namespace AspNetCoreVerifiableCredentials
                     NullValueHandling = NullValueHandling.Ignore
                 } );
 
-                _log.LogTrace( $"Request API payload: {jsonString}" );
                 var client = _httpClientFactory.CreateClient();
                 client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.token);
                 HttpResponseMessage res = await client.PostAsync(url, new StringContent(jsonString, Encoding.UTF8, "application/json"));
@@ -105,7 +103,6 @@ namespace AspNetCoreVerifiableCredentials
 
                 if (statusCode == HttpStatusCode.Created)
                 {
-                    _log.LogTrace("succesfully called Request Service API\n" + response);
                     JObject requestConfig = JObject.Parse(response);
                     requestConfig.Add(new JProperty("id", request.callback.state));
                     jsonString = JsonConvert.SerializeObject(requestConfig);
@@ -126,14 +123,14 @@ namespace AspNetCoreVerifiableCredentials
                 }
                 else
                 {
-                    _log.LogError("Error calling Verified ID API: "  + response );
-                    return BadRequest(new { error = "400", error_description = "Verified ID API error response: " + response, request = jsonString });
+                    _log.LogError("Credential request could not be completed.");
+                    return BadRequest(new { error = "400", error_description = "Credential request could not be completed" });
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                _log.LogError( "Exception: " + ex.Message );
-                return BadRequest(new { error = "400", error_description = "Exception: " + ex.Message });
+                _log.LogError("Credential request could not be completed.");
+                return BadRequest(new { error = "400", error_description = "Credential request could not be completed" });
             }            
         }
 
@@ -144,7 +141,6 @@ namespace AspNetCoreVerifiableCredentials
         [AllowAnonymous]
         [HttpGet("/api/verifier/get-presentation-details")]
         public ActionResult getPresentationDetails() {
-            _log.LogTrace( this.Request.GetDisplayUrl() );
             try {
                 PresentationRequest request = CreatePresentationRequest();
                 var details = new {
@@ -156,8 +152,8 @@ namespace AspNetCoreVerifiableCredentials
                     PhotoClaimName = _configuration.GetValue( "VerifiedID:PhotoClaimName", "" )
                 };
                 return new ContentResult { ContentType = "application/json", Content = JsonConvert.SerializeObject(details) };
-            } catch (Exception ex) {
-                return BadRequest(new { error = "400", error_description = ex.Message });
+            } catch (Exception) {
+                return BadRequest(new { error = "400", error_description = "Request could not be completed" });
             }
         }
 

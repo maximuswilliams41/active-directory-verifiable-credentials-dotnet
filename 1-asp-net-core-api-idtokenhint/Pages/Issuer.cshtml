@@ -1,4 +1,4 @@
-﻿@page
+@page
 @model AspNetCoreVerifiableCredentials.Pages.IssuerModel
 @{
     ViewData["Title"] = "Issuer";
@@ -63,8 +63,8 @@
                                 havePhotoClaim = true;
                                 hideShowPhotoElements("");
                             }
-                        }).catch(error => { console.log(error.message); })
-                }).catch(error => { console.log(error.message); })
+                        }).catch(error => { console.warn("Credential display could not be loaded."); })
+                }).catch(error => { console.warn("Credential display could not be loaded."); })
 
             document.getElementById('issue-credential').addEventListener('click', () => {
                 if ( havePhotoClaim ) {

@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Identity.Client;
 using Microsoft.Identity.Web;
 using Microsoft.Extensions.DependencyInjection;
@@ -31,8 +31,8 @@ namespace AspNetCoreVerifiableCredentials {
                     var credential = new ChainedTokenCredential( new ManagedIdentityCredential(), new EnvironmentCredential() );
                     var token = credential.GetToken( new Azure.Core.TokenRequestContext( scopes ) );
                     return (token.Token, string.Empty, string.Empty);
-                } catch (Exception ex) {
-                    return (string.Empty, "500", "Error acquiring an access token via MSI: " + ex.Message);
+                } catch (Exception) {
+                    return (string.Empty, "500", "Token acquisition failed");
                 }
             }
 
@@ -61,8 +61,7 @@ namespace AspNetCoreVerifiableCredentials {
             //so no need to create new ones for every web request
             app.AddDistributedTokenCache( services => {
                 services.AddDistributedMemoryCache();
-                services.AddLogging( configure => configure.AddConsole() )
-                .Configure<LoggerFilterOptions>( options => options.MinLevel = Microsoft.Extensions.Logging.LogLevel.Debug );
+                services.AddLogging();
             } );
 
             AuthenticationResult result = null;
@@ -70,8 +69,8 @@ namespace AspNetCoreVerifiableCredentials {
                 result = await app.AcquireTokenForClient( scopes ).ExecuteAsync();
             } catch (MsalServiceException ex) when (ex.Message.Contains( "AADSTS70011" )) {
                 return (string.Empty, "500", "Scope provided is not supported");
-            } catch (MsalServiceException ex) {
-                return (string.Empty, "500", "Something went wrong getting an access token for the client API:" + ex.Message);
+            } catch (MsalServiceException) {
+                return (string.Empty, "500", "Token acquisition failed");
             }
 
             return (result.AccessToken, string.Empty, string.Empty);

@@ -1,4 +1,4 @@
-﻿@page
+@page
 @model AspNetCoreVerifiableCredentials.Pages.VerifierModel
 @{
     ViewData["Title"] = "Verifier";
@@ -76,7 +76,6 @@
                     var idx = 0;
                     for (idx = Object.keys(payload).length - 1; idx >= 0; idx--) {
                         var claimName = Object.keys(payload)[idx];
-                        console.log(claimName);
                         if (claimName !== "claims") {
                             if (Object.keys(payload[Object.keys(payload)[idx]]).length > 0) {
                                 addTableRow(tbodyRef, claimName, JSON.stringify(payload[Object.keys(payload)[idx]]))
@@ -107,7 +106,6 @@
                     .catch(error => document.getElementById("message").innerHTML = error)
                     .then(response => {
                         if (response.length > 0) {
-                            console.log(response)
                             respMsg = JSON.parse(response);
                             if (respMsg.status == 'presentation_verified') {
                                 document.getElementById('vcType').innerText = respMsg.type[1] + " " + respMsg.message;

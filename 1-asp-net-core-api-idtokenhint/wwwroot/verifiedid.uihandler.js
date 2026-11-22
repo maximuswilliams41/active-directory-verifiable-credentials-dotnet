@@ -66,7 +66,6 @@ function selfieTaken(id, response) {
 }
 function requestError(requestType, response) {
     hideQRCode();
-    console.log(JSON.stringify(response));
     displayMessage(`${requestType} error: ` + JSON.stringify(response));
 }
 // method to post selfie taken before starting an issuance request
@@ -93,7 +92,6 @@ function uploadImage(e) {
                 var canvas = document.createElement("canvas");
                 canvas.width = 480;
                 canvas.height = 640;
-                console.log(`img size: ${imageObj.naturalWidth} x ${imageObj.naturalHeight}`);
                 canvas.getContext('2d').drawImage(imageObj, 0, 0, imageObj.naturalWidth, imageObj.naturalHeight, 0, 0, canvas.width, canvas.height);
                 document.getElementById("selfie").src = canvas.toDataURL('image/jpeg');
                 document.getElementById("selfie").style.display = "block";
