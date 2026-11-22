@@ -5,6 +5,8 @@ on:
     paths:
       - '1-asp-net-core-api-idtokenhint/**'
       - 'tests/Aya.EmployeeId.Tests/**'
+      - 'src/Aya.Revocation/**'
+      - 'docs/aya-employee-id/**'
       - '.github/workflows/aya-pr-validation.yml'
 permissions:
   contents: read

@@ -98,6 +98,16 @@ if (requestType != RequestType.Selfie)
                 if (callback == null || string.IsNullOrWhiteSpace(callback.state))
                     return BadRequest(new { error = "invalid_callback" });
 
+                if (requestType == RequestType.Presentation && callback.requestStatus == "presentation_verified" &&
+                    !AyaPresentationPolicy.HasValidCredentialStatuses(callback))
+                {
+                    callback.requestStatus = "presentation_error";
+                    callback.error = new Error { code = "credential_status_rejected", message = "Credential status is not valid." };
+                    callback.verifiedCredentialsData = null;
+                    callback.receipt = null;
+                    body = JsonConvert.SerializeObject(callback);
+                }
+
                 if (   (requestType == RequestType.Presentation && presentationStatus.Contains( callback.requestStatus ))
                     || (requestType == RequestType.Issuance && issuanceStatus.Contains( callback.requestStatus ))
                     || (requestType == RequestType.Selfie && selfieStatus.Contains( callback.requestStatus ))) {
@@ -191,6 +201,11 @@ if (requestType != RequestType.Selfie)
                         break;
                     case "presentation_verified":
                         callback = JsonConvert.DeserializeObject<CallbackEvent>(reqState["callback"].ToString() );
+                        if (!AyaPresentationPolicy.HasValidCredentialStatuses(callback))
+                        {
+                            result = JObject.FromObject(new { status = "presentation_error", message = "Credential status is not valid." });
+                            return false;
+                        }
                         JObject resp = JObject.Parse( JsonConvert.SerializeObject( new {
                                                                                     status = requestStatus,
                                                                                     message = "Presentation verified",
