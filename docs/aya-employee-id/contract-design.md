@@ -1,5 +1,7 @@
 # Aya Employee ID contract: review proposal
 
+This is the original PR #4 proposal. PR #4 is now merged; [the employee experience design](employee-experience.md) records the subsequent approvals and PR #5 implementation. The approved type, minimum visible fields, text branding and indexed-key mapping are implemented there; validity remains unset pending a six-versus-twelve-month decision. Statements below about the application not yet emitting the key describe the PR #4 baseline, not the reconciled branch. Microsoft configuration and live testing remain unperformed.
+
 ## Compatibility confirmed, tenant configuration not inspected
 
 Microsoft's [rules/display model](https://learn.microsoft.com/en-us/entra/verified-id/rules-and-display-definitions-model) supports an indexed claim in `idTokenHints.mapping`. Thus an immutable Aya employee key can be part of the intended credential contract. This is documentation/schema confirmation, not evidence that a tenant contract already contains that claim.

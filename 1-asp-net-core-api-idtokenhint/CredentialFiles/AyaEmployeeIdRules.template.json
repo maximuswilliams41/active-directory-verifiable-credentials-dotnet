@@ -1,0 +1,15 @@
+{
+  "attestations": {
+    "idTokenHints": [{
+      "required": true,
+      "mapping": [
+        { "inputClaim": "$.displayName", "outputClaim": "displayName", "required": true, "indexed": false },
+        { "inputClaim": "$.employeeId", "outputClaim": "employeeId", "required": true, "indexed": false },
+        { "inputClaim": "$.companyName", "outputClaim": "companyName", "required": true, "indexed": false },
+        { "inputClaim": "$.ayaEmployeeKey", "outputClaim": "ayaEmployeeKey", "required": true, "indexed": true }
+      ]
+    }]
+  },
+  "validityInterval": null,
+  "vc": { "type": ["AyaEmployeeId"] }
+}

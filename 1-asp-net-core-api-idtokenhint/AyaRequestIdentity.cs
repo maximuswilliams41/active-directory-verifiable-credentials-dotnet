@@ -10,6 +10,26 @@ namespace AspNetCoreVerifiableCredentials
     // These headers must be supplied exclusively by the trusted App Service auth boundary.
     public static class AyaRequestIdentity
     {
+        public static Guid RequireTenant(HttpContext context, string configuredTenant)
+        {
+            try
+            {
+                var claims = JObject.Parse(Encoding.UTF8.GetString(Convert.FromBase64String(
+                    context.Request.Headers["X-MS-CLIENT-PRINCIPAL"].ToString())))["claims"] as JArray;
+                var ids = claims?.OfType<JObject>().Where(c => c.Value<string>("typ") == "tid" ||
+                    c.Value<string>("typ") == "http://schemas.microsoft.com/identity/claims/tenantid")
+                    .Select(c => c.Value<string>("val")).ToArray();
+                if (!Guid.TryParse(configuredTenant, out var tenant) || tenant == Guid.Empty || ids == null ||
+                    ids.Length == 0 || ids.Any(id => !Guid.TryParse(id, out var parsed) || parsed != tenant))
+                    throw new UnauthorizedAccessException("Approved tenant required.");
+                return tenant;
+            }
+            catch (Exception ex) when (ex is FormatException || ex is JsonException || ex is ArgumentException)
+            {
+                throw new UnauthorizedAccessException("Approved tenant required.");
+            }
+        }
+
         public static string RequireOwner(HttpContext context)
         {
             try

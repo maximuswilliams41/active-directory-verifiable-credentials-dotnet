@@ -18,16 +18,18 @@ namespace Aya.EmployeeId.Tests;
 // All identifiers, keys, tokens and profiles in this suite are synthetic.
 public sealed class IssuanceTests
 {
+    internal const string Tenant = "33333333-3333-4333-8333-333333333333";
+    internal const string EmployeeKey = "44444444-4444-4444-8444-444444444444";
     internal const string Owner = "11111111-1111-4111-8111-111111111111";
     internal const string Other = "22222222-2222-4222-8222-222222222222";
     internal const string CallbackKey = "synthetic-test-callback-key";
 
     internal static string Principal(string owner, bool role = true) => Convert.ToBase64String(Encoding.UTF8.GetBytes(
         JsonConvert.SerializeObject(new { claims = new[] {
-            new { typ = "oid", val = owner }, new { typ = "roles", val = role ? "Aya.EmployeeID.Request" : "Other.Role" }
+            new { typ = "oid", val = owner }, new { typ = "tid", val = Tenant }, new { typ = "roles", val = role ? "Aya.EmployeeID.Request" : "Other.Role" }
         } })));
 
-    private static void Identity(HttpClient client, string owner = Owner, bool role = true)
+    internal static void Identity(HttpClient client, string owner = Owner, bool role = true)
     {
         client.DefaultRequestHeaders.Remove("X-MS-CLIENT-PRINCIPAL");
         client.DefaultRequestHeaders.Remove("X-MS-CLIENT-PRINCIPAL-ID");
@@ -36,7 +38,7 @@ public sealed class IssuanceTests
         client.DefaultRequestHeaders.Add("X-MS-CLIENT-PRINCIPAL-ID", owner);
         client.DefaultRequestHeaders.Add("X-MS-TOKEN-AAD-ACCESS-TOKEN", "synthetic-profile-token");
     }
-    private static async Task<HttpResponseMessage> Issue(HttpClient client)
+    internal static async Task<HttpResponseMessage> Issue(HttpClient client)
     {
         var page = await client.GetAsync("/Issuer");
         var html = await page.Content.ReadAsStringAsync();
@@ -73,7 +75,7 @@ public sealed class IssuanceTests
         Assert.Equal(HttpStatusCode.OK, (await Callback(client, state, "issuance_successful")).StatusCode);
         Assert.Equal("issuance_successful", JObject.Parse(await client.GetStringAsync("/api/request-status?id=" + state))["status"]);
         Assert.Equal(1, app.Outbound.IssuanceCalls);
-        Assert.Equal("Synthetic", app.Outbound.LastClaims.Value<string>("firstName"));
+        Assert.Equal("Synthetic Fixture", app.Outbound.LastClaims.Value<string>("displayName"));
         Assert.Equal("SYNTHETIC-001", app.Outbound.LastClaims.Value<string>("employeeId"));
         Assert.DoesNotContain(app.Logs.Entries, value => value.Contains(CallbackKey) || value.Contains("synthetic-profile-token") || value.Contains("SYNTHETIC-001"));
     }
@@ -222,6 +224,7 @@ public sealed class IssuanceTests
         public readonly CapturedLogs Logs = new();
         public bool Enabled = true;
         public string ConfiguredKey = CallbackKey;
+        public readonly Dictionary<string,string> Overrides = new();
         private IHost _host;
         internal IServiceProvider Services => _host.Services;
         public IEnumerable<string> Actions() => _host.Services
@@ -238,10 +241,13 @@ public sealed class IssuanceTests
             builder.UseContentRoot(Path.GetFullPath("../../../../../1-asp-net-core-api-idtokenhint", AppContext.BaseDirectory));
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string,string> {
                 ["Aya:IssuanceEnabled"] = Enabled.ToString(), ["Aya:CallbackApiKey"] = ConfiguredKey,
-                ["VerifiedID:CredentialManifest"] = "https://issuer.invalid/a/b/synthetic-tenant/manifest",
-                ["VerifiedID:TenantId"] = "synthetic-tenant", ["VerifiedID:ApiEndpoint"] = "https://service.invalid/",
+                ["Aya:CredentialValidityDays"] = "180",
+                ["Aya:EmployeeRegistry:0:TenantId"] = Tenant, ["Aya:EmployeeRegistry:0:ObjectId"] = Owner,
+                ["Aya:EmployeeRegistry:0:EmployeeKey"] = EmployeeKey, ["Aya:EmployeeRegistry:0:Active"] = "true",
+                ["VerifiedID:CredentialManifest"] = "https://issuer.invalid/a/b/" + Tenant + "/manifest",
+                ["VerifiedID:TenantId"] = Tenant, ["VerifiedID:ApiEndpoint"] = "https://service.invalid/",
                 ["VerifiedID:DidAuthority"] = "did:example:synthetic", ["VerifiedID:IssuancePinCodeLength"] = "0"
-            }));
+            }).AddInMemoryCollection(Overrides));
             builder.ConfigureLogging(log => { log.ClearProviders(); log.AddProvider(Logs); log.SetMinimumLevel(LogLevel.Trace); });
             builder.ConfigureServices(services => {
                 services.RemoveAll<IHttpClientFactory>(); services.AddSingleton<IHttpClientFactory>(Outbound);
@@ -264,22 +270,25 @@ public sealed class IssuanceTests
         public int IssuanceCalls;
         public string Mode;
         public JObject LastClaims;
+        public JObject LastRequest;
+        public int GraphCalls;
         public HttpClient CreateClient(string name) => new(this, false);
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             if (request.RequestUri.Host == "graph.microsoft.com" && request.RequestUri.AbsolutePath == "/v1.0/me")
             {
+                GraphCalls++;
                 if (Mode == "graph_error") return new(HttpStatusCode.ServiceUnavailable);
-                return Json(HttpStatusCode.OK, new { id = Mode == "mismatch" ? Other : Owner, userType = Mode == "guest" ? "Guest" : "Member",
+                return Json(HttpStatusCode.OK, new { accountEnabled = Mode == "unknown_enabled" ? (bool?)null : Mode != "disabled", id = Mode == "mismatch" ? Other : Owner, userType = Mode == "guest" ? "Guest" : "Member",
                     companyName = Mode == "company" ? "Synthetic Other" : "Aya Living Inc.", givenName = "Synthetic", surname = "Fixture", displayName = "Synthetic Fixture",
                     employeeId = Mode == "missing_attribute" ? "" : "SYNTHETIC-001", mail = "fixture@example.invalid" });
             }
             if (request.RequestUri.Host == "service.invalid" && request.RequestUri.AbsolutePath == "/createIssuanceRequest")
             {
-                IssuanceCalls++; LastClaims = (JObject)JObject.Parse(await request.Content.ReadAsStringAsync(cancellationToken))["claims"];
+                IssuanceCalls++; LastRequest = JObject.Parse(await request.Content.ReadAsStringAsync(cancellationToken)); LastClaims = (JObject)LastRequest["claims"];
                 if (Mode == "service_error") return Json(HttpStatusCode.BadRequest, new { error = "synthetic-private-detail" });
                 return Json(HttpStatusCode.Created, new { requestId = Mode == "missing_request_id" ? null : "synthetic-request",
-                    expiry = DateTimeOffset.UtcNow.AddMinutes(Mode == "expired_response" ? -1 : 5).ToUnixTimeSeconds(), url = "https://wallet.invalid/synthetic" });
+                    expiry = DateTimeOffset.UtcNow.AddMinutes(Mode == "expired_response" ? -1 : 5).ToUnixTimeSeconds(), url = "openid://vc?request_uri=https://verifiedid.did.msidentity.com/synthetic" });
             }
             throw new InvalidOperationException("Unexpected outbound request in synthetic test.");
         }

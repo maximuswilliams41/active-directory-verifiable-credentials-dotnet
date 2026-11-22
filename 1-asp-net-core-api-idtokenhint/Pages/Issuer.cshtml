@@ -1,96 +1,39 @@
 @page
 @model AspNetCoreVerifiableCredentials.Pages.IssuerModel
-@{
-    ViewData["Title"] = "Issuer";
-}
-<div id="wrap">
-    <div style="text-align: center;">
-        <img id="logo" src="VerifiedCredentialExpert-icon.png" height=200px; />
-        <h1 id="idTitle">Verifiable Credential Issuance</h1>
-        <h2 id="idSubTitle"></h2>
-
-        <p id="photo-help" style="text-align:left; display:none">
-            This verifiable credential includes a photo claim that you can be used for biometric face check during presentation. You can either take a selfie or upload an existing picture of you before you issue the credential.
-            <br /><br />
-            For selfie, click the Take Selfie button, then scan the QR code with the <strong>QR Code Reader app</strong> on your mobile, click 'Open Camera' in the page, take selfie and then click 'Use photo' in the mobile.
-            The photo is not persisted anywhere and is just added to the credential you will have in your wallet.
-            <br /><br />
-            Then click Issue Credential to start the issuance process. When the QR code appears, scan it with your <strong>Microsoft Authenticator</strong> or your <strong>custom wallet</strong> app.
-            <br /><br />
-            The photo should be a portrait photo of atleast 200x200 pixels. Glasses, masks, hats, headphones, head coverings and face coverings will result in failure in liveness checks during presentations.
-        </p>
-
-        <div id="message-wrapper" class="margin-bottom-75" style="display: none">
-            <i class="fas fa-user-check green icon-text-large margin-bottom-25"></i>
-            <div id="message"></div>
+@inject AyaCredentialPolicy Policy
+@{ ViewData["Title"] = "Your employee ID"; }
+<section class="aya-intro">
+    <p class="aya-eyebrow">YOUR DIGITAL EMPLOYEE ID</p>
+    <h1>Your Aya Employee ID.<br />With you in Authenticator.</h1>
+    <p>Check your employee information, then add your ID to Microsoft Authenticator on your phone.</p>
+</section>
+<section id="aya-issuance" class="aya-grid" data-ready="@Policy.Ready.ToString().ToLowerInvariant()">
+    <article class="aya-card" aria-label="Employee ID preview">
+        <div class="aya-card-brand">Aya Living <span>EMPLOYEE ID</span></div>
+        <p class="aya-card-label">Employee name</p><h2 id="employee-name">Your name</h2>
+        <dl><dt>Employee number</dt><dd id="employee-number">Shown after eligibility check</dd>
+            <dt>Organization</dt><dd id="employee-company">Aya Living Inc.</dd></dl>
+        <p class="aya-card-note">Preview · Verify employment electronically.<br />Card appearance alone does not confirm current status.</p>
+    </article>
+    <div class="aya-panel">
+        <h2>Add your ID</h2>
+        <ol class="aya-steps"><li>Check your eligibility and employee details.</li><li>Open Authenticator on this phone, or scan the QR code from another device.</li><li>Review and accept your Aya Employee ID.</li></ol>
+        <p>Validity: <strong>@(Policy.ValidityDays.HasValue ? $"{Policy.ValidityDays} days" : "Awaiting policy approval")</strong></p>
+        <p id="aya-status" role="status" aria-live="polite">@(Policy.Ready ? "Check your details to begin." : "Issuance is currently disabled. No credential will be issued.")</p>
+        <div id="aya-actions">
+            <button id="check-eligibility" type="button" disabled="@(!Policy.Ready)">Check my eligibility</button>
+            <button id="issue-credential" type="button" hidden>Add to Microsoft Authenticator</button>
+            <button id="stop-waiting" type="button" class="aya-secondary" hidden>Stop waiting</button>
         </div>
-
-<form id="aya-antiforgery" method="post" style="display:none">
-    @Html.AntiForgeryToken()
-</form>
-
-        <button type="button" id="issue-credential" class="button bg-nw-purple text-nw-white">Issue Credential</button>
-        <button type="button" id="check-result" class="button bg-nw-purple text-nw-white" style="display:none">Check Result</button>
-        <button type="button" id="take-selfie" class="button bg-nw-purple text-nw-white" style="display:none">Take Selfie</button>
-
-        <input type='file' id="imageUpload" accept="image/*" class="button bg-nw-blue text-nw-white" style="display:none" />
-        <br /><br />
-        <div id="qrcode" style="text-align:center; display:none"></div>
-        <br />
-        <div id="pinCode" style="display: none"></div>
-        <br />
-        <img id="selfie" width="240" height="320" style="display:none" />
-
-        <script src="qrcode.min.js"></script>
-        <script src="verifiedid.requestservice.client.js"></script>
-        <script src="verifiedid.uihandler.js"></script>
-
-        <script>
-            var qrcode = new QRCode("qrcode", { width: 150, height: 150 });
-            var havePhotoClaim = false;
-
-            fetch('api/issuer/get-manifest')
-                .then(function (response) {
-                    response.text()
-                        .catch(error => displayMessage(error))
-                        .then(function (message) {
-                            var manifest = JSON.parse(message);
-                            document.getElementById('idTitle').innerHTML = "Issuance of " + manifest.display.card.title + " by " + manifest.display.card.issuedBy;
-                            document.getElementById('idSubTitle').innerHTML = manifest.display.card.description;
-                            document.getElementById('logo').src = manifest.display.card.logo.uri;
-                            // if the manifest has a claim with type image/jp[e]g, then we should support adding a photo
-                            if (message.includes("image/jp")) {
-                                havePhotoClaim = true;
-                                hideShowPhotoElements("");
-                            }
-                        }).catch(error => { console.warn("Credential display could not be loaded."); })
-                }).catch(error => { console.warn("Credential display could not be loaded."); })
-
-            document.getElementById('issue-credential').addEventListener('click', () => {
-                if ( havePhotoClaim ) {
-                    setUserPhoto();
-                    hideShowPhotoElements("none");
-                    // make sure the photo is sent to API in backend before we continue
-                    setTimeout(requestService.createIssuanceRequest(), 250);
-                } else {
-                    requestService.createIssuanceRequest();
-                }
-            });
-
-            document.getElementById('take-selfie').addEventListener('click', () => {
-                document.getElementById("selfie").src = "";
-                document.getElementById("selfie").style.display = "none";
-                document.getElementById("imageUpload").style.display = "none";
-                requestService.createSelfieRequest();
-            });
-
-            document.getElementById('check-result').addEventListener('click', () => {
-                requestService.pollRequestStatus(requestService.request.id);
-            });
-
-            document.getElementById('imageUpload').addEventListener('change', function (e) {
-                uploadImage(e)
-            });
-        </script>
+        <div id="aya-wallet" hidden>
+            <a id="authenticator-link" class="aya-button" href="#">Open Microsoft Authenticator</a>
+            <p>Using another device? Scan this code with Microsoft Authenticator.</p>
+            <div id="qrcode" aria-label="Authenticator issuance QR code"></div>
+            <p id="pinCode" hidden></p>
+        </div>
+        <p class="aya-help">Details incorrect or unable to continue? Contact your Aya administrator. Never share your QR code or PIN.</p>
     </div>
-</div>
+</section>
+<form id="aya-antiforgery" method="post" hidden>@Html.AntiForgeryToken()</form>
+<script src="/qrcode.min.js"></script>
+<script src="/aya-employee-id.js" defer></script>

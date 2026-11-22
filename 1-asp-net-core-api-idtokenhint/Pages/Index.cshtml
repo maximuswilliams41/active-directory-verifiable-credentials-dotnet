@@ -1,24 +1,14 @@
-﻿@page
+@page
 @model IndexModel
-@{
-    ViewData["Title"] = "Home";
-}
-
-            <div style="text-align: center;">
-                <img src="VerifiedCredentialExpert-icon.png" height=200px; />
-                <h1>Verifiable Credential Expert Issuance and Verifier Sample</h1>
-        
-                <button type="button" id="idIssue" class="button">Issue Credential</button>
-                <button type="button" id="idVerify" class="button">Verify Credential</button>
-                <script>
-                        var idIssue = document.getElementById('idIssue');
-                        var idVerify = document.getElementById('idVerify');
-
-                        idIssue.addEventListener('click', () => {
-                            window.location = "issuer";
-                        })
-                        idVerify.addEventListener('click', () => {
-                            window.location = "verifier";
-                        })
-                    </script>
-            </div>
+@{ ViewData["Title"] = "Employee ID"; }
+<section class="aya-intro">
+    <p class="aya-eyebrow">AYA LIVING · EMPLOYEE SERVICES</p>
+    <h1>Your employee ID,<br />in Microsoft Authenticator.</h1>
+    <p>A digital credential with your employee name, employee number and organization. You choose when to present it.</p>
+    <a class="aya-button" href="/Issuer">View your employee ID</a>
+</section>
+<section class="aya-panel">
+    <h2>Built for your workday</h2>
+    <p>Sign in with your Aya employee account, check your information and follow the steps to add your ID when issuance is available.</p>
+    <p>Employment status must be verified electronically. A card or screenshot alone is not proof of current employment.</p>
+</section>

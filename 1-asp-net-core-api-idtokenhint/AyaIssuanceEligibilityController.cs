@@ -10,16 +10,20 @@ namespace AspNetCoreVerifiableCredentials
     public class AyaIssuanceEligibilityController : ControllerBase
     {
         private readonly AyaEmployeeClaimsService _claims;
+        private readonly AyaCredentialPolicy _policy;
 
         public AyaIssuanceEligibilityController(
-            AyaEmployeeClaimsService claims)
+            AyaEmployeeClaimsService claims, AyaCredentialPolicy policy)
         {
             _claims = claims;
+            _policy = policy;
         }
 
         [HttpGet("/api/aya/issuance-eligibility")]
+        [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
         public async Task<IActionResult> Check()
         {
+            if (!_policy.Ready) return StatusCode(503, new { eligible = false, error = "issuance_disabled" });
             try
             {
                 await _claims.GetClaimsAsync(HttpContext);
