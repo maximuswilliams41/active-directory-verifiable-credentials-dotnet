@@ -226,12 +226,13 @@ public sealed class IssuanceTests
         public string ConfiguredKey = CallbackKey;
         public readonly Dictionary<string,string> Overrides = new();
         private IHost _host;
+        public string StorePath = Path.Combine(Path.GetTempPath(), "aya-synthetic-" + Guid.NewGuid(), "requests.json");
         internal IServiceProvider Services => _host.Services;
         public IEnumerable<string> Actions() => _host.Services
             .GetRequiredService<Microsoft.AspNetCore.Mvc.Infrastructure.IActionDescriptorCollectionProvider>()
             .ActionDescriptors.Items.OfType<Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor>()
             .Where(action => action.ControllerTypeInfo.AsType() == typeof(IssuerController)).Select(action => action.ActionName);
-        public void Dispose() => _host?.Dispose();
+        public void Dispose() { _host?.Dispose(); }
         public HttpClient CreateClient()
         {
             _host = Host.CreateDefaultBuilder().ConfigureWebHost(builder =>
@@ -241,10 +242,11 @@ public sealed class IssuanceTests
             builder.UseContentRoot(Path.GetFullPath("../../../../../1-asp-net-core-api-idtokenhint", AppContext.BaseDirectory));
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string,string> {
                 ["Aya:IssuanceEnabled"] = Enabled.ToString(), ["Aya:CallbackApiKey"] = ConfiguredKey,
-                ["Aya:CredentialValidityDays"] = "180",
+                ["Aya:CredentialValidityDays"] = "180", ["Aya:RequestStorePath"] = StorePath,
+                ["Aya:PublicOrigin"] = "https://pilot.example.invalid", ["Aya:VerificationEnabled"] = "true",
                 ["Aya:EmployeeRegistry:0:TenantId"] = Tenant, ["Aya:EmployeeRegistry:0:ObjectId"] = Owner,
                 ["Aya:EmployeeRegistry:0:EmployeeKey"] = EmployeeKey, ["Aya:EmployeeRegistry:0:Active"] = "true",
-                ["VerifiedID:CredentialManifest"] = "https://issuer.invalid/a/b/" + Tenant + "/manifest",
+                ["VerifiedID:CredentialManifest"] = "https://verifiedid.did.msidentity.com/v1.0/tenants/" + Tenant + "/verifiableCredentials/contracts/synthetic/manifest",
                 ["VerifiedID:TenantId"] = Tenant, ["VerifiedID:ApiEndpoint"] = "https://service.invalid/",
                 ["VerifiedID:DidAuthority"] = "did:example:synthetic", ["VerifiedID:IssuancePinCodeLength"] = "0"
             }).AddInMemoryCollection(Overrides));
@@ -272,6 +274,8 @@ public sealed class IssuanceTests
         public JObject LastClaims;
         public JObject LastRequest;
         public int GraphCalls;
+        public int PresentationCalls;
+        public Func<JObject, Task> BeforeResponse;
         public HttpClient CreateClient(string name) => new(this, false);
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -286,9 +290,18 @@ public sealed class IssuanceTests
             if (request.RequestUri.Host == "service.invalid" && request.RequestUri.AbsolutePath == "/createIssuanceRequest")
             {
                 IssuanceCalls++; LastRequest = JObject.Parse(await request.Content.ReadAsStringAsync(cancellationToken)); LastClaims = (JObject)LastRequest["claims"];
+                if (BeforeResponse != null) await BeforeResponse(LastRequest);
                 if (Mode == "service_error") return Json(HttpStatusCode.BadRequest, new { error = "synthetic-private-detail" });
                 return Json(HttpStatusCode.Created, new { requestId = Mode == "missing_request_id" ? null : "synthetic-request",
                     expiry = DateTimeOffset.UtcNow.AddMinutes(Mode == "expired_response" ? -1 : 5).ToUnixTimeSeconds(), url = "openid://vc?request_uri=https://verifiedid.did.msidentity.com/synthetic" });
+            }
+            if (request.RequestUri.Host == "service.invalid" && request.RequestUri.AbsolutePath == "/createPresentationRequest")
+            {
+                PresentationCalls++; LastRequest = JObject.Parse(await request.Content.ReadAsStringAsync(cancellationToken));
+                if (BeforeResponse != null) await BeforeResponse(LastRequest);
+                if (Mode == "service_error") return Json(HttpStatusCode.BadRequest, new { error = "synthetic-private-detail" });
+                return Json(HttpStatusCode.Created, new { requestId = "synthetic-presentation",
+                    expiry = DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeSeconds(), url = "openid-vc://?request_uri=https://verifiedid.did.msidentity.com/synthetic" });
             }
             throw new InvalidOperationException("Unexpected outbound request in synthetic test.");
         }

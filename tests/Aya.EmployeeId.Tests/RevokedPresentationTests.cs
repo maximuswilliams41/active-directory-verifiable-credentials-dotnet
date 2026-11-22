@@ -24,20 +24,21 @@ public sealed class RevokedPresentationTests
     public async Task Presentation_callback_accepts_only_explicit_valid_status(string status, string expected)
     {
         using var app = new IssuanceTests.TestApp(); using var client = app.CreateClient();
-        var cache = app.Services.GetRequiredService<IMemoryCache>();
+        var store = app.Services.GetRequiredService<AyaIssuanceStateStore>();
         string state = Guid.NewGuid().ToString();
-        cache.Set(state, JsonConvert.SerializeObject(new { status = "request_created" }));
+        Assert.True(store.Begin(state, IssuanceTests.Owner, "presentation", "did:example:synthetic"));
+        Assert.True(store.Bind(state, "synthetic-presentation", DateTimeOffset.UtcNow.AddMinutes(5)));
         var callback = Event(status); callback.state = state;
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/verifier/presentationcallback");
         request.Headers.Add("api-key", IssuanceTests.CallbackKey);
         request.Content = new StringContent(JsonConvert.SerializeObject(callback), Encoding.UTF8, "application/json");
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(request)).StatusCode);
-        var saved = JObject.Parse(cache.Get<string>(state));
-        Assert.Equal(expected, saved.Value<string>("status"));
+        Assert.True(store.TryGetStatus(state, IssuanceTests.Owner, "presentation", out var saved));
+        Assert.Equal(expected, saved);
         if (expected == "presentation_error")
         {
-            Assert.DoesNotContain("synthetic-claim-value", saved.Value<string>("callback"));
-            Assert.DoesNotContain("synthetic-receipt", saved.Value<string>("callback"));
+            Assert.DoesNotContain("synthetic-claim-value", File.ReadAllText(app.StorePath));
+            Assert.DoesNotContain("synthetic-receipt", File.ReadAllText(app.StorePath));
         }
         Assert.Equal(0, app.Outbound.IssuanceCalls); Assert.Equal(0, app.Tokens.Calls);
     }
@@ -58,10 +59,11 @@ public sealed class RevokedPresentationTests
         using var cache = new MemoryCache(new MemoryCacheOptions());
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string>
         {
+            ["Aya:PublicOrigin"] = "https://pilot.example.invalid",
             ["VerifiedID:allowRevoked"] = "true", ["VerifiedID:CredentialType"] = "SyntheticAyaEmployeeId",
             ["VerifiedID:DidAuthority"] = "did:example:synthetic", ["VerifiedID:client_name"] = "Synthetic verifier"
         }).Build();
-        var controller = new VerifierController(configuration, cache, NullLogger<VerifierController>.Instance, new IssuanceTests.FakeOutbound())
+        var controller = new VerifierController(configuration, cache, NullLogger<VerifierController>.Instance, new IssuanceTests.FakeOutbound(), new IssuanceTests.FakeTokens(), new AyaIssuanceStateStore(new SyntheticPersistence(), TimeProvider.System))
         { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
         var configured = controller.CreatePresentationRequest();
         Assert.False(configured.requestedCredentials.Single().configuration.validation.allowRevoked);
@@ -80,7 +82,7 @@ public sealed class RevokedPresentationTests
         string state = Guid.NewGuid().ToString();
         cache.Set(state, JsonConvert.SerializeObject(new { status = "presentation_verified", callback = JsonConvert.SerializeObject(Event("REVOKED")) }));
         var controller = new CallbackController(new ConfigurationBuilder().Build(), cache,
-            NullLogger<CallbackController>.Instance, new AyaIssuanceStateStore(cache, TimeProvider.System))
+            NullLogger<CallbackController>.Instance, new AyaIssuanceStateStore(new SyntheticPersistence(), TimeProvider.System))
         { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
         controller.Request.QueryString = new QueryString("?id=" + state);
         Assert.False(controller.PollRequestStatus(out var result));
@@ -91,8 +93,8 @@ public sealed class RevokedPresentationTests
     {
         requestId = "synthetic-presentation", requestStatus = "presentation_verified",
         verifiedCredentialsData = [new ClaimsIssuer {
-            type = ["SyntheticAyaEmployeeId"], issuer = "did:example:synthetic",
-            claims = new Dictionary<string, string> { ["syntheticClaim"] = "synthetic-claim-value" },
+            type = ["AyaEmployeeId"], expirationDate = DateTimeOffset.UtcNow.AddDays(1).ToString("O"), issuer = "did:example:synthetic",
+            claims = new Dictionary<string, string> { ["displayName"] = "synthetic-claim-value", ["employeeId"] = "SYNTHETIC-001", ["companyName"] = "Aya Living Inc.", ["ayaEmployeeKey"] = IssuanceTests.EmployeeKey },
             credentialState = status == null ? null : new CredentialState { revocationStatus = status }
         }],
         receipt = new Receipt { vp_token = ["synthetic-receipt"] }

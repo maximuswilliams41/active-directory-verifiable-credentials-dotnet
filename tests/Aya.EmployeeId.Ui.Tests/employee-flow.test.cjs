@@ -62,3 +62,14 @@ test('late response after stopping cannot reopen a wallet request', async () => 
     const issuing = f.flow.issue(); f.flow.stop(); resolve({ ok: true, json: async () => request }); await issuing;
     assert.equal(f.flow.state.stage, 'stopped'); assert.equal(f.flow.state.request, null);
 });
+
+test('issuance QR expiry allows the server-bounded final result window', async () => {
+    const f = fixture(); f.responses.push({ body: profile }, { body: { ...request, statusExpiry: request.expiry + 120 } });
+    await f.flow.profile(); await f.flow.issue(); f.advance(60000);
+    f.responses.push({ body: { status: 'issuance_successful' } }); await f.poll(); assert.equal(f.flow.state.stage, 'success');
+});
+test('issuance final deadline remains unconfirmed and does not reissue', async () => {
+    const f = fixture(); f.responses.push({ body: profile }, { body: { ...request, statusExpiry: request.expiry + 120 } });
+    await f.flow.profile(); await f.flow.issue(); f.advance(180000); await f.poll();
+    assert.equal(f.flow.state.stage, 'expired'); assert.match(f.flow.state.message, /unconfirmed/); assert.equal(f.calls.length, 2);
+});

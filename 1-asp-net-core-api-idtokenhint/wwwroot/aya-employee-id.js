@@ -32,14 +32,16 @@ class AyaEmployeeFlow {
             const target = new URL(link.searchParams.get("request_uri"));
             if (link.protocol !== "openid:" || link.hostname !== "vc" || target.protocol !== "https:" ||
                 target.hostname !== "verifiedid.did.msidentity.com" || target.username || target.password ||
-                !/^[0-9a-f-]{36}$/i.test(request.id) || !Number.isFinite(request.expiry) || request.expiry * 1000 <= this.now()) throw new Error();
+                !/^[0-9a-f-]{36}$/i.test(request.id) || !Number.isFinite(request.expiry) || request.expiry * 1000 <= this.now() ||
+                (request.statusExpiry !== undefined && (!Number.isFinite(request.statusExpiry) || request.statusExpiry < request.expiry || request.statusExpiry > request.expiry + 120))) throw new Error();
             this.update({ stage: "waiting", request, message: "Open Authenticator or scan the code. Review and accept your ID." });
             this.timer = this.schedule(() => this.poll(generation), 2000);
         } catch { if (generation === this.generation) this.update({ stage: "error", request: null, message: "Your ID could not be prepared. Check eligibility again or contact your Aya administrator." }); }
     }
     async poll(generation) {
         if (generation !== this.generation || this.state.stage !== "waiting") return;
-        if (this.state.request.expiry * 1000 <= this.now()) { this.update({ stage: "expired", request: null, message: "This request expired. Check eligibility to start again." }); return; }
+        if ((this.state.request.statusExpiry ?? this.state.request.expiry) * 1000 <= this.now()) { this.update({ stage: "expired", request: null, message: "The waiting period ended. Outcome is unconfirmed; contact the pilot administrator before requesting another ID." }); return; }
+        if (this.state.request.expiry * 1000 <= this.now()) this.update({ message: "The QR code expired. Checking for a final result…" });
         try {
             const response = await this.fetch("/api/request-status?id=" + encodeURIComponent(this.state.request.id), { credentials: "same-origin", cache: "no-store" });
             if (!response.ok) throw new Error();
@@ -69,19 +71,20 @@ if (typeof document !== "undefined" && document.getElementById("aya-issuance")) 
             element("check-eligibility").disabled = !flow.enabled || ["loading", "waiting"].includes(state.stage);
             element("issue-credential").hidden = state.stage !== "ready";
             element("stop-waiting").hidden = !["loading", "waiting"].includes(state.stage);
-            element("aya-wallet").hidden = state.stage !== "waiting";
+            const walletExpired = state.request && state.request.expiry * 1000 <= Date.now();
+            element("aya-wallet").hidden = state.stage !== "waiting" || walletExpired;
             if (state.profile) {
                 element("employee-name").textContent = state.profile.displayName;
                 element("employee-number").textContent = state.profile.employeeId;
                 element("employee-company").textContent = state.profile.companyName;
             }
-            if (state.request && state.request.url !== lastUrl) {
+            if (state.request && !walletExpired && state.request.url !== lastUrl) {
                 lastUrl = state.request.url; element("authenticator-link").href = lastUrl;
                 element("qrcode").replaceChildren(); new QRCode(element("qrcode"), { text: lastUrl, width: 180, height: 180 });
                 element("pinCode").hidden = !state.request.pin;
                 element("pinCode").textContent = state.request.pin ? "Your one-time PIN: " + state.request.pin : "";
             }
-            if (!state.request) { lastUrl = null; element("authenticator-link").removeAttribute("href"); element("qrcode").replaceChildren(); element("pinCode").textContent = ""; }
+            if (!state.request || walletExpired) { lastUrl = null; element("authenticator-link").removeAttribute("href"); element("qrcode").replaceChildren(); element("pinCode").textContent = ""; }
         }
     });
     element("check-eligibility").addEventListener("click", () => flow.profile());
