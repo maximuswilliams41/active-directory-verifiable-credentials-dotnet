@@ -307,7 +307,7 @@ public sealed class RequestReliabilityTests
     [Fact]
     public async Task Missing_storage_fails_closed_before_profile_or_token_calls()
     {
-        using var app = new IssuanceTests.TestApp(); app.Overrides["Aya:RequestStorePath"] = null;
+        using var app = new IssuanceTests.TestApp(); app.Overrides["Aya:RequestTable:Endpoint"] = null;
         using var client = app.CreateClient(); IssuanceTests.Identity(client);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, (await IssuanceTests.Issue(client)).StatusCode);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, (await Present(client)).StatusCode);

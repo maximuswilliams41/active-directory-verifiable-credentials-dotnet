@@ -223,6 +223,7 @@ public sealed class IssuanceTests
         public readonly FakeTokens Tokens = new();
         public readonly CapturedLogs Logs = new();
         public bool Enabled = true;
+        public IAyaRequestPersistence Persistence;
         public string ConfiguredKey = CallbackKey;
         public readonly Dictionary<string,string> Overrides = new();
         private IHost _host;
@@ -242,7 +243,10 @@ public sealed class IssuanceTests
             builder.UseContentRoot(Path.GetFullPath("../../../../../1-asp-net-core-api-idtokenhint", AppContext.BaseDirectory));
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string,string> {
                 ["Aya:IssuanceEnabled"] = Enabled.ToString(), ["Aya:CallbackApiKey"] = ConfiguredKey,
-                ["Aya:CredentialValidityDays"] = "180", ["Aya:RequestStorePath"] = StorePath,
+                ["Aya:CredentialValidityDays"] = "180",
+                ["Aya:RequestTable:Endpoint"] = "https://synthetic.table.core.windows.net",
+                ["Aya:RequestTable:TableName"] = "SyntheticRequests",
+                ["Aya:RequestTable:LedgerId"] = "55555555-5555-4555-8555-555555555555",
                 ["Aya:PublicOrigin"] = "https://pilot.example.invalid", ["Aya:VerificationEnabled"] = "true",
                 ["Aya:EmployeeRegistry:0:TenantId"] = Tenant, ["Aya:EmployeeRegistry:0:ObjectId"] = Owner,
                 ["Aya:EmployeeRegistry:0:EmployeeKey"] = EmployeeKey, ["Aya:EmployeeRegistry:0:Active"] = "true",
@@ -252,6 +256,10 @@ public sealed class IssuanceTests
             }).AddInMemoryCollection(Overrides));
             builder.ConfigureLogging(log => { log.ClearProviders(); log.AddProvider(Logs); log.SetMinimumLevel(LogLevel.Trace); });
             builder.ConfigureServices(services => {
+                services.RemoveAll<IAyaRequestPersistence>();
+                services.AddSingleton<IAyaRequestPersistence>(sp => Persistence ??
+                    (AyaRequestStorageConfiguration.IsConfigured(sp.GetRequiredService<IConfiguration>())
+                        ? new FileAyaRequestPersistence(StorePath) : new UnconfiguredAyaRequestPersistence()));
                 services.RemoveAll<IHttpClientFactory>(); services.AddSingleton<IHttpClientFactory>(Outbound);
                 services.RemoveAll<IVerifiedIdTokenProvider>(); services.AddSingleton<IVerifiedIdTokenProvider>(Tokens);
             });
