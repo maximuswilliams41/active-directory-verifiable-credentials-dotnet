@@ -183,6 +183,7 @@ namespace AspNetCoreVerifiableCredentials
             request.callback.url = $"{GetRequestHostName()}/api/verifier/presentationcallback";
             request.callback.state = (string.IsNullOrWhiteSpace( stateId ) ? Guid.NewGuid().ToString() : stateId);
             request.callback.headers = new Dictionary<string, string>() { { "api-key", this._apiKey } };
+            AyaPresentationPolicy.RequireRevocationChecks(request);
             return request;
         }
         /// <summary>
@@ -220,7 +221,7 @@ namespace AspNetCoreVerifiableCredentials
             } else {
                 okIssuers = new List<string>( acceptedIssuers );
             }
-            bool allowRevoked = _configuration.GetValue( "VerifiedID:allowRevoked", false );
+            bool allowRevoked = false;
             bool validateLinkedDomain = _configuration.GetValue( "VerifiedID:validateLinkedDomain", true );
             AddRequestedCredential( request, credentialType, okIssuers, allowRevoked, validateLinkedDomain );
             return request;
@@ -233,7 +234,7 @@ namespace AspNetCoreVerifiableCredentials
                 acceptedIssuers = (null == acceptedIssuers ? new List<string>() : acceptedIssuers),
                 configuration = new Configuration() {
                     validation = new Validation() {
-                        allowRevoked = allowRevoked,
+                        allowRevoked = false,
                         validateLinkedDomain = validateLinkedDomain
                     }
                 }
