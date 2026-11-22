@@ -1,0 +1,19 @@
+{
+  "locale": "en-US",
+  "card": {
+    "title": "Aya Employee ID",
+    "issuedBy": "Aya Living",
+    "backgroundColor": "#182F2B",
+    "textColor": "#FFFFFF",
+    "description": "Aya employee identification. Current employment must be verified electronically; card appearance alone does not confirm status."
+  },
+  "consent": {
+    "title": "Add your Aya Employee ID",
+    "instructions": "Review your employee information and accept to add this credential to Microsoft Authenticator."
+  },
+  "claims": [
+    { "claim": "vc.credentialSubject.displayName", "label": "Employee name", "type": "String" },
+    { "claim": "vc.credentialSubject.employeeId", "label": "Employee number", "type": "String" },
+    { "claim": "vc.credentialSubject.companyName", "label": "Organization", "type": "String" }
+  ]
+}

@@ -5,6 +5,8 @@ on:
     paths:
       - '1-asp-net-core-api-idtokenhint/**'
       - 'tests/Aya.EmployeeId.Tests/**'
+      - 'tests/Aya.EmployeeId.Ui.Tests/**'
+      - 'docs/aya-employee-id/**'
       - '.github/workflows/aya-pr-validation.yml'
 permissions:
   contents: read
@@ -28,3 +30,8 @@ jobs:
         run: dotnet build ../tests/Aya.EmployeeId.Tests/Aya.EmployeeId.Tests.csproj --configuration Release --no-restore
       - name: Run synthetic regression tests
         run: dotnet test ../tests/Aya.EmployeeId.Tests/Aya.EmployeeId.Tests.csproj --configuration Release --no-build --no-restore
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run synthetic employee flow tests
+        run: node --test ../tests/Aya.EmployeeId.Ui.Tests/*.test.cjs

@@ -62,6 +62,8 @@ services.AddAntiforgery(options =>
 
             services.AddHttpClient();  // use iHttpFactory as best practice, should be easy to use extra retry and hold off policies in the future
          services.AddScoped<AyaEmployeeClaimsService>();
+            services.AddSingleton<AyaCredentialPolicy>();
+            services.AddSingleton<AyaEmployeeRegistry>();
             services.AddSingleton(TimeProvider.System);
             services.AddSingleton<AyaIssuanceStateStore>();
             services.AddScoped<IVerifiedIdTokenProvider, VerifiedIdTokenProvider>();

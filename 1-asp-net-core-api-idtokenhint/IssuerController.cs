@@ -40,13 +40,15 @@ public class IssuerController : ControllerBase
         private string _apiKey;
         private readonly AyaIssuanceStateStore _issuanceStates;
         private readonly IVerifiedIdTokenProvider _tokens;
+        private readonly AyaCredentialPolicy _policy;
+        private readonly TimeProvider _time;
 
         public IssuerController(
             IConfiguration configuration,
             IMemoryCache memoryCache,
             ILogger<IssuerController> log,
             IHttpClientFactory httpClientFactory,
-            AyaEmployeeClaimsService ayaClaims, AyaIssuanceStateStore issuanceStates, IVerifiedIdTokenProvider tokens)
+            AyaEmployeeClaimsService ayaClaims, AyaIssuanceStateStore issuanceStates, IVerifiedIdTokenProvider tokens, AyaCredentialPolicy policy, TimeProvider time)
         {
             _cache = memoryCache;
             _log = log;
@@ -55,6 +57,8 @@ public class IssuerController : ControllerBase
             _ayaClaims = ayaClaims;
             _issuanceStates = issuanceStates;
             _tokens = tokens;
+            _policy = policy;
+            _time = time;
             
 _apiKey = _configuration["Aya:CallbackApiKey"];
 
@@ -76,6 +80,7 @@ _apiKey = _configuration["Aya:CallbackApiKey"];
         
 [HttpPost("/api/issuer/issuance-request")]
 [ValidateAntiForgeryToken]
+[ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public async Task<ActionResult> IssuanceRequest()
 
         {
@@ -89,7 +94,10 @@ public async Task<ActionResult> IssuanceRequest()
             error = "issuance_disabled",
             message = "Aya employee ID issuance is not yet enabled."
         });
-    }if (string.IsNullOrWhiteSpace(_apiKey))
+    }
+    if (!_policy.ValidityDays.HasValue)
+        return StatusCode(503, new { error = "validity_not_configured" });
+    if (string.IsNullOrWhiteSpace(_apiKey))
 {
     return StatusCode(503, new
     {
@@ -217,6 +225,7 @@ request.claims = claims;
         }
         [HttpGet("/api/issuer/get-manifest")]
         public ActionResult getManifest() {
+            if (!_policy.Ready) return StatusCode(503, new { error = "issuance_disabled" });
             try {
                 if ( !GetCredentialManifest( out string manifest, out string errmsg ) ) {
                     _log.LogError("Credential request could not be completed.");
@@ -283,7 +292,7 @@ request.claims = claims;
         protected bool IsMobile()
         {
             string userAgent = this.Request.Headers["User-Agent"];
-            return (userAgent.Contains("Android") || userAgent.Contains("iPhone"));
+            return (userAgent != null && (userAgent.Contains("Android") || userAgent.Contains("iPhone")));
         }
 
         [NonAction]
@@ -293,7 +302,7 @@ request.claims = claims;
                 includeQRCode = _configuration.GetValue( "VerifiedID:includeQRCode", false ),
                 authority = _configuration["VerifiedID:DidAuthority"],
                 registration = new Registration() {
-                    clientName = _configuration["VerifiedID:client_name"],
+                    clientName = AyaCredentialPolicy.IssuerName,
                     purpose = _configuration.GetValue( "VerifiedID:purpose", "" )
                 },
                 callback = new Callback() {
@@ -301,64 +310,20 @@ request.claims = claims;
                     state = Guid.NewGuid().ToString(),
                     headers = new Dictionary<string, string>() { { "api-key", this._apiKey } }
                 },
-                type = "ignore-this",
+                type = AyaCredentialPolicy.CredentialType,
                 manifest = _configuration["VerifiedID:CredentialManifest"],
                 pin = null
             };
             if ("" == request.registration.purpose) {
                 request.registration.purpose = null;
             }
-            if ( !IsMobile() ) {
-                int issuancePinCodeLength = _configuration.GetValue( "VerifiedID:IssuancePinCodeLength", 0 );
-                // if pincode is required, set it up in the request
-                if (issuancePinCodeLength > 0 ) {
-                    int pinCodeInt = RandomNumberGenerator.GetInt32( 1, int.Parse( "".PadRight( issuancePinCodeLength, '9' ) ) );
-                    pinCode = string.Format( "{0:D" + issuancePinCodeLength.ToString() + "}", pinCodeInt );
-                    if (_configuration.GetValue( "VerifiedID:HashPinCode", false ) ) {
-                        string salt = _configuration.GetValue( "VerifiedID:PinCodeSalt", Guid.NewGuid().ToString() );
-                        SetPinCode( request, Sha256Hash( salt + pinCode ), issuancePinCodeLength, salt );
-                    } else {
-                        SetPinCode( request, pinCode, issuancePinCodeLength );
-                    }
-                }
+            if (!IsMobile())
+            {
+                pinCode = RandomNumberGenerator.GetInt32(0, 1000000).ToString("D6");
+                var salt = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
+                SetPinCode(request, Sha256Hash(salt + pinCode), 6, salt);
             }
-            SetExpirationDate( request );
-            return request;
-        }
-        private IssuanceRequest SetExpirationDate( IssuanceRequest request) {
-            string credentialExpiration = _configuration.GetValue( "VerifiedID:CredentialExpiration", "" );
-            DateTime expDateUtc;
-            DateTime utcNow = DateTime.UtcNow;
-            // This is just examples for how to specify your own expiry dates
-            switch (credentialExpiration.ToUpperInvariant()) {
-                case "EOD":
-                    expDateUtc = DateTime.UtcNow;
-                    break;
-                case "EOW":
-                    int start = (int)utcNow.DayOfWeek;
-                    int target = (int)DayOfWeek.Sunday;
-                    if (target <= start)
-                        target += 7;
-                    expDateUtc = utcNow.AddDays( target - start );
-                    break;
-                case "EOM":
-                    expDateUtc = new DateTime( utcNow.Year, utcNow.Month, DateTime.DaysInMonth( utcNow.Year, utcNow.Month ) );
-                    break;
-                case "EOQ":
-                    int quarterEndMonth = (int)(3 * Math.Ceiling( (double)utcNow.Month / 3 ));
-                    expDateUtc = new DateTime( utcNow.Year, quarterEndMonth, DateTime.DaysInMonth( utcNow.Year, quarterEndMonth ) );
-                    break;
-                case "EOY":
-                    expDateUtc = new DateTime( utcNow.Year, 12, 31 );
-                    break;
-                default:
-                    return request;
-            }
-            // Remember that this date is expressed in UTC and Wallets/Authenticator displays the expiry date 
-            // in local timezone. So for example, EOY will be displayed as "Jan 1" if the user is in a timezone
-            // east of GMT. Also, if you issue a VC that should expire 5pm locally, then you need to calculate
-            // what 5pm locally is in UTC time
-            request.expirationDate = $"{Convert.ToDateTime( expDateUtc ).ToString( "yyyy-MM-dd" )}T23:59:59.000Z";
+            request.expirationDate = _policy.Expiration(_time.GetUtcNow()).ToString("O");
             return request;
         }
         [NonAction]
