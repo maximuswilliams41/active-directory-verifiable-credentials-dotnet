@@ -15,7 +15,6 @@ function RequestService(onDrawQRCode, onNavigateToDeepLink, onRequestRetrieved, 
     this.logEnabled = false;
     this.log = function (msg) {
         if (this.logEnabled) {
-            console.log(msg);
         }
     }
     this.request = null;
@@ -58,7 +57,6 @@ const response = await fetch(url, {
 });
 
         const respJson = await response.json();
-        console.log(respJson);
         
 if (!response.ok || respJson.error || respJson.error_description) {
     this.onError(
@@ -72,10 +70,8 @@ if (!response.ok || respJson.error || respJson.error_description) {
 
             this.request = respJson;
             if (/Android/i.test(navigator.userAgent) || /iPhone/i.test(navigator.userAgent)) {
-                this.log(`Mobile device (${navigator.userAgent})! Using deep link (${respJson.url}).`);
                 this.onNavigateToDeepLink(this.requestType, respJson.id, respJson.url);
             } else {
-                this.log(`Not Android or IOS. Generating QR code encoded with ${message}`);
                 this.onDrawQRCode(this.requestType, respJson.id, respJson.url, respJson.pin);
                 this.pollRequestStatus(respJson.id);
             }
@@ -101,39 +97,32 @@ if (!response.ok || respJson.error || respJson.error_description) {
             var tmNow = (new Date()).getTime() / 1000;
             if ((tmNow - 10) > _rsThis.request.expiry) {
                 clearInterval(pollFlag);
-                _rsThis.log(`${(tmNow - 10)} > ${_rsThis.request.expiry}`);
                 _rsThis.onError( { error: "timeout", error_description: `The ${_rsThis.requestType} request was not process in time.` });
                 return;
             }
             const response = await fetch(`${_rsThis.apiPollPresentationRequest}?id=${id}`);
             const respMsg = await response.json();
-            _rsThis.log(respMsg);
             if (respMsg.error_description) {
                 clearInterval(pollFlag);
                 _rsThis.onError(respMsg.error_description);
             } else {
                 if (respMsg.status == 'request_retrieved') {
-                    _rsThis.log(`onRequestRetrieved()`);
                     _rsThis.onRequestRetrieved(_rsThis.requestType);
                 }
                 if (respMsg.status == 'presentation_verified') {
                     clearInterval(pollFlag);
-                    _rsThis.log(`onPresentationVerified( ${id}, ... )`);
                     _rsThis.onPresentationVerified(id, respMsg);
                 }
                 if (respMsg.status == 'issuance_successful') {
                     clearInterval(pollFlag);
-                    _rsThis.log(`onIssuanceSuccesful( ${id}, ... )`);
                     _rsThis.onIssuanceSuccesful(id, respMsg);
                 }
                 if (respMsg.status == 'selfie_taken') {
                     clearInterval(pollFlag);
-                    _rsThis.log(`onSelfieTaken( ${id}, ... )`);
                     _rsThis.onSelfieTaken(id, respMsg);
                 }
                 if (respMsg.status == 'presentation_error' || respMsg.status == 'issuance_error') {
                     clearInterval(pollFlag);
-                    _rsThis.log(`onError(...)`);
                     _rsThis.onError(this.requestType, respMsg);
                 }
             }
@@ -141,14 +130,12 @@ if (!response.ok || respJson.error || respJson.error_description) {
     }; // pollRequestStatus
 
     this.setUserPhoto = async function (base64Image) {
-        this.log('setUserPhoto(): ' + base64Image );
         const response = await fetch(this.apiSetPhoto, {
             headers: { 'Accept': 'application/json', 'Content-Type': 'image/jpeg', 'rsid': this.uuid },
                                                          method: 'POST',
                                                          body: base64Image
                                                         });
         const respJson = await response.json();
-        this.log(respJson);
         if (respJson.error_description) {
             this.onError(this.requestType, respJson.error_description);
             return -1;

@@ -24,58 +24,10 @@ namespace AspNetCoreVerifiableCredentials
         public async Task<Dictionary<string, string>>
             GetClaimsAsync(HttpContext context)
         {
-            // Use identity provided by Azure App Service.
-            string principal = context.Request.Headers[
-                "X-MS-CLIENT-PRINCIPAL"].ToString();
-
-            string token = context.Request.Headers[
-                "X-MS-TOKEN-AAD-ACCESS-TOKEN"].ToString();
-
-            if (string.IsNullOrWhiteSpace(principal) ||
-                string.IsNullOrWhiteSpace(token))
-                throw new UnauthorizedAccessException(
-                    "Authenticated Entra session required.");
-
-            // Extract the signed-in user's Entra object ID.
-            var decoded = Encoding.UTF8.GetString(
-                Convert.FromBase64String(principal));
-
-            var identity = JObject.Parse(decoded);
-            var entries = identity["claims"] as JArray;
-
-            string objectId = entries?
-                .OfType<JObject>()
-                .Where(c =>
-                    c.Value<string>("typ") == "oid" ||
-                    c.Value<string>("typ") ==
-                    "http://schemas.microsoft.com/identity/claims/objectidentifier")
-                .Select(c => c.Value<string>("val"))
-                .FirstOrDefault();
-
-            if (string.IsNullOrWhiteSpace(objectId))
-                throw new UnauthorizedAccessException(
-                    "Entra object ID not available.");
-
-            // Aya Living: require explicit permission to
-            // request an employee identification credential.
-            bool authorized = entries?
-                .OfType<JObject>()
-                .Any(c =>
-                    (
-                        c.Value<string>("typ") == "roles" ||
-                        c.Value<string>("typ") == "role" ||
-                        c.Value<string>("typ") ==
-                        "http://schemas.microsoft.com/ws/2008/06/identity/claims/role"
-                    ) &&
-                    c.Value<string>("val") ==
-                        "Aya.EmployeeID.Request"
-                ) == true;
-
-            if (!authorized)
-            {
-                throw new UnauthorizedAccessException(
-                    "Employee is not authorized to request an Aya ID.");
-            }
+            string objectId = AyaRequestIdentity.RequireOwner(context);
+            string token = context.Request.Headers["X-MS-TOKEN-AAD-ACCESS-TOKEN"].ToString();
+            if (string.IsNullOrWhiteSpace(token))
+                throw new UnauthorizedAccessException("Authenticated employee session required.");
 
             // Graph returns the authenticated user's record.
             string url =

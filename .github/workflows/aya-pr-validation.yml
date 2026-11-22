@@ -1,0 +1,30 @@
+name: Aya synthetic PR validation
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '1-asp-net-core-api-idtokenhint/**'
+      - 'tests/Aya.EmployeeId.Tests/**'
+      - '.github/workflows/aya-pr-validation.yml'
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: 1-asp-net-core-api-idtokenhint
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore synthetic tests
+        run: dotnet restore ../tests/Aya.EmployeeId.Tests/Aya.EmployeeId.Tests.csproj
+      - name: Build app and tests
+        run: dotnet build ../tests/Aya.EmployeeId.Tests/Aya.EmployeeId.Tests.csproj --configuration Release --no-restore
+      - name: Run synthetic regression tests
+        run: dotnet test ../tests/Aya.EmployeeId.Tests/Aya.EmployeeId.Tests.csproj --configuration Release --no-build --no-restore

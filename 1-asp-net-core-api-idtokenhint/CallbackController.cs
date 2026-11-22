@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Identity.Client;
 using Newtonsoft.Json;
@@ -41,9 +41,11 @@ namespace AspNetCoreVerifiableCredentials
         protected readonly ILogger<CallbackController> _log;
         private string _apiKey;
         private IConfiguration _configuration;
-        public CallbackController(IConfiguration configuration, IMemoryCache memoryCache, ILogger<CallbackController> log)
+        private readonly AyaIssuanceStateStore _issuanceStates;
+        public CallbackController(IConfiguration configuration, IMemoryCache memoryCache, ILogger<CallbackController> log, AyaIssuanceStateStore issuanceStates)
         {
             _configuration = configuration;
+            _issuanceStates = issuanceStates;
             _cache = memoryCache;
             _log = log;
             
@@ -81,7 +83,6 @@ if (requestType != RequestType.Selfie)
 
                 if ( body == null) {
                     body = await new System.IO.StreamReader( this.Request.Body ).ReadToEndAsync();
-                    _log.LogTrace( body );
                 }
 
                 bool rc = false;
@@ -90,7 +91,12 @@ if (requestType != RequestType.Selfie)
                 List<string> issuanceStatus = new List<string>() { "request_retrieved", "issuance_successful", "issuance_error" };
                 List<string> selfieStatus = new List<string>() { "selfie_taken" };
 
-                CallbackEvent callback = JsonConvert.DeserializeObject<CallbackEvent>( body );
+                CallbackEvent callback = JsonConvert.DeserializeObject<CallbackEvent>(body,
+                    new JsonSerializerSettings { MaxDepth = 16 });
+                if (requestType == RequestType.Issuance)
+                    return _issuanceStates.Apply(callback) ? Ok() : BadRequest(new { error = "invalid_callback" });
+                if (callback == null || string.IsNullOrWhiteSpace(callback.state))
+                    return BadRequest(new { error = "invalid_callback" });
 
                 if (   (requestType == RequestType.Presentation && presentationStatus.Contains( callback.requestStatus ))
                     || (requestType == RequestType.Issuance && issuanceStatus.Contains( callback.requestStatus ))
@@ -116,66 +122,43 @@ if (requestType != RequestType.Selfie)
                     return BadRequest( new { error = "400", error_description = errorMessage } );
                 }
                 return new OkResult();
-            } catch (Exception ex) {
-                return BadRequest( new { error = "400", error_description = ex.Message } );
+            } catch (Exception) {
+                return BadRequest( new { error = "400", error_description = "Request could not be completed" } );
             }
         }
 
         [AllowAnonymous]
         [HttpPost( "/api/issuer/issuecallback" )]
+        [RequestSizeLimit(16384)]
         public async Task<ActionResult> IssuanceCallback() {
-            _log.LogTrace( this.Request.GetDisplayUrl() );
             return await HandleRequestCallback( RequestType.Issuance, null );
         }
 
         [AllowAnonymous]
         [HttpPost( "/api/verifier/presentationcallback" )]
         public async Task<ActionResult> PresentationCallback() {
-            _log.LogTrace( this.Request.GetDisplayUrl() );
             return await HandleRequestCallback( RequestType.Presentation, null );
         }
 
-        [HttpGet( "/api/request-status" )]
-        public ActionResult RequestStatus() {
-            _log.LogTrace( this.Request.GetDisplayUrl() );
-            try {
-string principalId = Request.Headers[
-    "X-MS-CLIENT-PRINCIPAL-ID"].ToString();
+        [HttpGet("/api/request-status")]
+        public ActionResult RequestStatus()
+        {
+            string owner;
+            try { owner = AyaRequestIdentity.RequireOwner(HttpContext); }
+            catch (UnauthorizedAccessException) { return Unauthorized(); }
+            if (!_issuanceStates.TryGetStatus(Request.Query["id"], owner, out var status))
+                return NotFound();
+            string message = status switch
+            {
+                "issuance_successful" => "Issuance successful",
+                "issuance_error" => "Issuance failed",
+                "request_retrieved" => "QR code is scanned. Waiting for user action...",
+                _ => "Waiting to scan QR code"
+            };
+            return Ok(new { status, message });
+        }
 
-if (string.IsNullOrWhiteSpace(principalId) ||
-    string.IsNullOrWhiteSpace(Request.Headers[
-        "X-MS-CLIENT-PRINCIPAL"].ToString()))
-{
-    return Unauthorized();
-}
-
-string state = Request.Query["id"].ToString();
-
-if (string.IsNullOrWhiteSpace(state) ||
-    !_cache.TryGetValue(state, out string cached))
-{
-    return NotFound();
-}
-
-JObject requestState = JObject.Parse(cached);
-
-if (requestState.Value<string>("kind") != "issuance" ||
-    !string.Equals(
-        requestState.Value<string>("ownerPrincipalId"),
-        principalId,
-        StringComparison.Ordinal))
-{
-    return NotFound();
-}
-
-                if (! PollRequestStatus( out JObject response )) {
-                    return BadRequest( new { error = "400", error_description = JsonConvert.SerializeObject( response ) } );
-                }
-                return new ContentResult { ContentType = "application/json", Content = JsonConvert.SerializeObject( response ) };
-            } catch (Exception ex) {
-                return BadRequest( new { error = "400", error_description = ex.Message } );
-            }
-        }[NonAction]
+        [NonAction]
         public bool PollRequestStatus( out JObject result ) {
             result = null;
             string state = this.Request.Query["id"];
@@ -250,10 +233,8 @@ if (requestState.Value<string>("kind") != "issuance" ||
         [AllowAnonymous]
         [HttpPost( "/api/issuer/selfie/{id}" )]
         public async Task<ActionResult> setSelfie( string id ) {
-            _log.LogTrace( this.Request.GetDisplayUrl() );
             try {
                 string body = new System.IO.StreamReader( this.Request.Body ).ReadToEnd();
-                _log.LogTrace( body );
                 string dataImage = "data:image/jpeg;base64,";
                 int idx = body.IndexOf( ";base64," );
                 if (-1 == idx) {
@@ -267,8 +248,8 @@ if (requestState.Value<string>("kind") != "issuance" ||
                     photo = photo
                 };
                 return await HandleRequestCallback( RequestType.Selfie, JsonConvert.SerializeObject( callback ) );
-            } catch (Exception ex) {
-                return BadRequest( new { error = "400", error_description = ex.Message } );
+            } catch (Exception) {
+                return BadRequest( new { error = "400", error_description = "Request could not be completed" } );
             }
         }
 

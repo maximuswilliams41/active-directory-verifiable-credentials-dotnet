@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using System;
 using System.IO;
 using System.Collections.Generic;
@@ -38,33 +38,27 @@ public class IssuerController : ControllerBase
         private IConfiguration _configuration;
         private readonly AyaEmployeeClaimsService _ayaClaims;
         private string _apiKey;
+        private readonly AyaIssuanceStateStore _issuanceStates;
+        private readonly IVerifiedIdTokenProvider _tokens;
 
         public IssuerController(
             IConfiguration configuration,
             IMemoryCache memoryCache,
             ILogger<IssuerController> log,
             IHttpClientFactory httpClientFactory,
-            AyaEmployeeClaimsService ayaClaims)
+            AyaEmployeeClaimsService ayaClaims, AyaIssuanceStateStore issuanceStates, IVerifiedIdTokenProvider tokens)
         {
             _cache = memoryCache;
             _log = log;
             _configuration = configuration;
             _httpClientFactory = httpClientFactory;
             _ayaClaims = ayaClaims;
+            _issuanceStates = issuanceStates;
+            _tokens = tokens;
             
 _apiKey = _configuration["Aya:CallbackApiKey"];
 
         }
-
-        private async Task<IssuanceRequest> SetClaimsAsync(
-            IssuanceRequest request)
-        {
-            request.claims = await _ayaClaims.GetClaimsAsync(
-                HttpContext);
-
-            return request;
-        }
-
 
         public static string Sha256Hash( string source ) {
             string hash = null;
@@ -103,31 +97,24 @@ public async Task<ActionResult> IssuanceRequest()
     });
 }
 
-string ownerPrincipalId = Request.Headers[
-    "X-MS-CLIENT-PRINCIPAL-ID"].ToString();
+string ownerPrincipalId;
+try { ownerPrincipalId = AyaRequestIdentity.RequireOwner(HttpContext); }
+catch (UnauthorizedAccessException) { return Unauthorized(); }
 
-if (string.IsNullOrWhiteSpace(ownerPrincipalId) ||
-    string.IsNullOrWhiteSpace(Request.Headers[
-        "X-MS-CLIENT-PRINCIPAL"].ToString()))
-{
-    return Unauthorized();
-}
-
-            _log.LogTrace( this.HttpContext.Request.GetDisplayUrl() );
             try
             {
                 string manifestUrl = _configuration["VerifiedID:CredentialManifest"];
                 if ( string.IsNullOrWhiteSpace(manifestUrl ) ) {
                     string errmsg = $"Manifest missing in config file";
-                    _log.LogError( errmsg );
+                    _log.LogError("Credential request could not be completed.");
                     return BadRequest( new { error = "400", error_description = errmsg } );
                 }
                 string tenantId = _configuration["VerifiedID:TenantId"];
                 string manifestTenantId = manifestUrl.Split("/")[5];
                 if ( manifestTenantId != tenantId)
                 {
-                    string errmsg = $"TenantId in ManifestURL {manifestTenantId}. does not match tenantId in config file {tenantId}";
-                    _log.LogError(errmsg);
+                    string errmsg = "Credential configuration mismatch";
+                    _log.LogError("Credential request could not be completed.");
                     return BadRequest(new { error = "400", error_description = errmsg });
                 }
 
@@ -135,25 +122,26 @@ if (string.IsNullOrWhiteSpace(ownerPrincipalId) ||
                 {
                     //The VC Request API is an authenticated API. We need to clientid and secret (or certificate) to create an access token which 
                     //needs to be send as bearer to the VC Request API
-                    var accessToken = await MsalAccessTokenHandler.GetAccessToken( _configuration );
+                    // Complete employee eligibility before acquiring an application token.
+                    var claims = await _ayaClaims.GetClaimsAsync(HttpContext);
+                    var accessToken = await _tokens.GetAccessToken();
                     if (accessToken.Item1 == String.Empty)
                     {
-                        _log.LogError(String.Format("failed to acquire accesstoken: {0} : {1}", accessToken.error, accessToken.error_description));
-                        return BadRequest(new { error = accessToken.error, error_description = accessToken.error_description });
+                        _log.LogError("Credential request could not be completed.");
+                        return BadRequest(new { error = accessToken.error, error_description = "Token acquisition failed" });
                     }
                     IssuanceRequest request = CreateIssuanceRequest( out string pinCode );                    
 
                     // If the credential uses the idTokenHint attestation flow, then you must set the claims before
                     // calling the Request Service API
                     
-request = await SetClaimsAsync(request);
+request.claims = claims;
 
 
                     string jsonString = JsonConvert.SerializeObject( request, Newtonsoft.Json.Formatting.None, new JsonSerializerSettings {
                         NullValueHandling = NullValueHandling.Ignore
                     } );
 
-                    _log.LogTrace( $"Request API payload: {jsonString}" );
                     var client = _httpClientFactory.CreateClient();
                     client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.token);
                     string url = $"{_configuration["VerifiedID:ApiEndpoint"]}createIssuanceRequest";
@@ -162,7 +150,6 @@ request = await SetClaimsAsync(request);
 
                     if (res.StatusCode == HttpStatusCode.Created)
                     {
-                        _log.LogTrace("succesfully called Request API");
                         JObject requestConfig = JObject.Parse(response);
                         if (!string.IsNullOrEmpty(pinCode) ) { 
                             requestConfig["pin"] = pinCode;
@@ -170,31 +157,33 @@ request = await SetClaimsAsync(request);
                         requestConfig.Add(new JProperty("id", request.callback.state));
                         jsonString = JsonConvert.SerializeObject(requestConfig);
 
-                        //We use in memory cache to keep state about the request. The UI will check the state when calling the presentationResponse method
-                        var cacheData = new
-                        {
-                            status = "request_created",
-                            message = "Waiting for QR code to be scanned",
-                            expiry = requestConfig["expiry"].ToString()
-                        };
-                        _cache.Set(request.callback.state, JsonConvert.SerializeObject(cacheData)
-                                      , DateTimeOffset.Now.AddSeconds( _configuration.GetValue<int>( "AppSettings:CacheExpiresInSeconds", 300 ) ) );
+                        if (!long.TryParse(requestConfig["expiry"]?.ToString(), out var expiry))
+                            return StatusCode(502, new { error = "invalid_service_response" });
+                        var expires = DateTimeOffset.FromUnixTimeSeconds(expiry);
+                        var localExpiry = DateTimeOffset.UtcNow.AddSeconds(Math.Clamp(
+                            _configuration.GetValue<int>("AppSettings:CacheExpiresInSeconds", 300), 1, 3600));
+                        if (!_issuanceStates.Create(request.callback.state, ownerPrincipalId,
+                            requestConfig.Value<string>("requestId"), expires < localExpiry ? expires : localExpiry))
+                            return StatusCode(502, new { error = "invalid_service_response" });
                         return new ContentResult { ContentType = "application/json", Content = jsonString };
                     }
                     else
                     {
-                        _log.LogError("Unsuccesfully called Request API" + response);
-                        return BadRequest(new { error = "400", error_description = "Something went wrong calling the API: " + response });
+                        _log.LogError("Credential request could not be completed.");
+                        return BadRequest(new { error = "400", error_description = "Credential request could not be completed" });
                     }
                 }
-                catch (Exception ex)
+                catch (UnauthorizedAccessException) { return StatusCode(403, new { error = "employee_not_eligible" }); }
+                catch (InvalidOperationException) { return Conflict(new { error = "incomplete_employee_profile" }); }
+                catch (HttpRequestException) { return StatusCode(502, new { error = "upstream_unavailable" }); }
+                catch (Exception)
                 {
-                    return BadRequest(new { error = "400", error_description = "Something went wrong calling the API: " + ex.Message });
+                    return BadRequest(new { error = "400", error_description = "Credential request could not be completed" });
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                return BadRequest(new { error = "400", error_description = ex.Message });
+                return BadRequest(new { error = "400", error_description = "Request could not be completed" });
             }
         }
 
@@ -228,21 +217,19 @@ request = await SetClaimsAsync(request);
         }
         [HttpGet("/api/issuer/get-manifest")]
         public ActionResult getManifest() {
-            _log.LogTrace( this.HttpContext.Request.GetDisplayUrl() );
             try {
                 if ( !GetCredentialManifest( out string manifest, out string errmsg ) ) {
-                    _log.LogError( errmsg );
+                    _log.LogError("Credential request could not be completed.");
                     return BadRequest( new { error = "400", error_description = errmsg } );
                 }
                 return new ContentResult { ContentType = "application/json", Content = manifest };
-            } catch (Exception ex) {
-                return BadRequest(new { error = "400", error_description = ex.Message });
+            } catch (Exception) {
+                return BadRequest(new { error = "400", error_description = "Request could not be completed" });
             }
         }
 
         [HttpGet( "/api/issuer/selfie-request" )]
         public ActionResult SelfieRequest() {
-            _log.LogTrace( this.HttpContext.Request.GetDisplayUrl() );
             try {
                 string hostname = GetRequestHostName();
                 string id = Guid.NewGuid().ToString();
@@ -256,18 +243,16 @@ request = await SetClaimsAsync(request);
                 string resp = _cache.Set( id, JsonConvert.SerializeObject( request )
                     , DateTimeOffset.Now.AddSeconds( _configuration.GetValue<int>( "AppSettings:CacheExpiresInSeconds", 300 ) ) );
                 return new ContentResult { StatusCode = (int)HttpStatusCode.Created, ContentType = "application/json", Content = resp };
-            } catch (Exception ex) {
-                return BadRequest( new { error = "400", error_description = ex.Message } );
+            } catch (Exception) {
+                return BadRequest( new { error = "400", error_description = "Request could not be completed" } );
             }
         }
 
         [AllowAnonymous]
         [HttpPost( "/api/issuer/userphoto" )]
         public ActionResult SetUserPhoto() {
-            _log.LogTrace( this.HttpContext.Request.GetDisplayUrl() );
             try {
                 string body = new System.IO.StreamReader( this.Request.Body ).ReadToEndAsync().Result;
-                _log.LogTrace( body );
                 int idx = body.IndexOf( ";base64," );
                 if (-1 == idx) {
                     return BadRequest( new { error = "400", error_description = $"Image must be 'data:image/jpeg;base64,'" } );
@@ -276,11 +261,10 @@ request = await SetClaimsAsync(request);
                 string photoId = this.Request.Headers["rsid"];
                 int cacheSeconds = _configuration.GetValue<int>( "AppSettings:CacheExpiresInSeconds", 300 );
                 _cache.Set( photoId, photo, DateTimeOffset.Now.AddSeconds( cacheSeconds ) );
-                _log.LogTrace( $"User set photo to add to credential. photoId: {photoId}" );
                 return new ContentResult { StatusCode = (int)HttpStatusCode.Created, ContentType = "application/json"
                                 , Content = JsonConvert.SerializeObject( new { id = photoId, message = $"Photo will be cached for {cacheSeconds} seconds" } ) };
-            } catch (Exception ex) {
-                return BadRequest( new { error = "400", error_description = ex.Message } );
+            } catch (Exception) {
+                return BadRequest( new { error = "400", error_description = "Request could not be completed" } );
             }
         }
 
@@ -302,6 +286,7 @@ request = await SetClaimsAsync(request);
             return (userAgent.Contains("Android") || userAgent.Contains("iPhone"));
         }
 
+        [NonAction]
         public IssuanceRequest CreateIssuanceRequest( out string pinCode ) {
             pinCode = null;
             IssuanceRequest request = new IssuanceRequest() {
@@ -329,7 +314,6 @@ request = await SetClaimsAsync(request);
                 if (issuancePinCodeLength > 0 ) {
                     int pinCodeInt = RandomNumberGenerator.GetInt32( 1, int.Parse( "".PadRight( issuancePinCodeLength, '9' ) ) );
                     pinCode = string.Format( "{0:D" + issuancePinCodeLength.ToString() + "}", pinCodeInt );
-                    _log.LogTrace( "pin={0}", pinCode );
                     if (_configuration.GetValue( "VerifiedID:HashPinCode", false ) ) {
                         string salt = _configuration.GetValue( "VerifiedID:PinCodeSalt", Guid.NewGuid().ToString() );
                         SetPinCode( request, Sha256Hash( salt + pinCode ), issuancePinCodeLength, salt );
@@ -377,6 +361,7 @@ request = await SetClaimsAsync(request);
             request.expirationDate = $"{Convert.ToDateTime( expDateUtc ).ToString( "yyyy-MM-dd" )}T23:59:59.000Z";
             return request;
         }
+        [NonAction]
         public IssuanceRequest SetPinCode( IssuanceRequest request, string pinCode = null, int pinCodeLength = 0, string salt = null) {
             if (string.IsNullOrWhiteSpace( pinCode )) {
                 request.pin = null;
