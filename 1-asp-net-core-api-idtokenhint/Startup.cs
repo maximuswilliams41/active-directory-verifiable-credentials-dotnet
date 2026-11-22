@@ -28,14 +28,6 @@ namespace AspNetCoreVerifiableCredentials
                 options.AllowSynchronousIO = true;
             });
 
-            services.AddCors(o => o.AddPolicy("MyPolicy", builder =>
-            {
-                builder.AllowAnyOrigin()
-                       .AllowAnyMethod()
-                       .AllowAnyHeader();
-                    // .WithOrigins("http://example.com","http://www.contoso.com");
-            }));
-
             //services.Configure<AppSettingsModel>(Configuration.GetSection("AppSettings"));
 
 
@@ -65,7 +57,12 @@ services.AddAntiforgery(options =>
             services.AddSingleton<AyaCredentialPolicy>();
             services.AddSingleton<AyaEmployeeRegistry>();
             services.AddSingleton(TimeProvider.System);
+            services.AddSingleton<IAyaRequestPersistence>(_ => {
+                var path = Configuration["Aya:RequestStorePath"];
+                return string.IsNullOrWhiteSpace(path) ? new UnconfiguredAyaRequestPersistence() : new FileAyaRequestPersistence(path);
+            });
             services.AddSingleton<AyaIssuanceStateStore>();
+            services.AddSingleton<AyaRequestConfiguration>();
             services.AddScoped<IVerifiedIdTokenProvider, VerifiedIdTokenProvider>();
              } 
 
@@ -87,11 +84,19 @@ services.AddAntiforgery(options =>
                 // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
                 app.UseHsts();
             }
+            app.Use(async (context, next) => {
+                try { await next(); }
+                catch (AyaStorageException) {
+                    context.Response.StatusCode = 503;
+                    context.Response.Headers.CacheControl = "no-store";
+                    await context.Response.WriteAsJsonAsync(new { error = "request_storage_unavailable" });
+                }
+            });
             app.UseHttpsRedirection();
             app.UseStaticFiles();
             app.UseRouting();
             app.UseSession();
-            app.UseCors("MyPolicy");
+            // The Aya browser flows use same-origin requests; callbacks are server-to-server.
 
             app.UseEndpoints(endpoints =>
             {

@@ -9,3 +9,5 @@ These are parallel workstreams. Local revocation development does not replace th
 | **Owner-only Microsoft validation** | Manual checklist in both documents | Owner configures and tests a nonproduction synthetic credential, then returns non-sensitive outcomes. No deployment or live issuance is authorized by this PR. |
 
 Issuance remains disabled by default. Neither workstream is complete merely because this local simulation passes. The next primary product checkpoint remains replacing the generic sample with an approved Aya Employee ID contract, display and validity period.
+
+The next controlled-test checkpoint is [request reliability](request-reliability.md). The separate [owner-only Microsoft checklist](microsoft-pilot-checklist.md) covers storage qualification, configuration, deployment approval and synthetic device acceptance. Neither document authorizes activation.

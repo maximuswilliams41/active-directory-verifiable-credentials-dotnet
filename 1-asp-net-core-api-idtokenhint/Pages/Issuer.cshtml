@@ -1,13 +1,14 @@
 @page
 @model AspNetCoreVerifiableCredentials.Pages.IssuerModel
 @inject AyaCredentialPolicy Policy
-@{ ViewData["Title"] = "Your employee ID"; }
+@inject AyaRequestConfiguration RequestSettings
+@{ ViewData["Title"] = "Your employee ID"; var ready = Policy.Ready && RequestSettings.Ready(true); }
 <section class="aya-intro">
     <p class="aya-eyebrow">YOUR DIGITAL EMPLOYEE ID</p>
     <h1>Your Aya Employee ID.<br />With you in Authenticator.</h1>
     <p>Check your employee information, then add your ID to Microsoft Authenticator on your phone.</p>
 </section>
-<section id="aya-issuance" class="aya-grid" data-ready="@Policy.Ready.ToString().ToLowerInvariant()">
+<section id="aya-issuance" class="aya-grid" data-ready="@ready.ToString().ToLowerInvariant()">
     <article class="aya-card" aria-label="Employee ID preview">
         <div class="aya-card-brand">Aya Living <span>EMPLOYEE ID</span></div>
         <p class="aya-card-label">Employee name</p><h2 id="employee-name">Your name</h2>
@@ -19,9 +20,9 @@
         <h2>Add your ID</h2>
         <ol class="aya-steps"><li>Check your eligibility and employee details.</li><li>Open Authenticator on this phone, or scan the QR code from another device.</li><li>Review and accept your Aya Employee ID.</li></ol>
         <p>Validity: <strong>@(Policy.ValidityDays.HasValue ? $"{Policy.ValidityDays} days" : "Awaiting policy approval")</strong></p>
-        <p id="aya-status" role="status" aria-live="polite">@(Policy.Ready ? "Check your details to begin." : "Issuance is currently disabled. No credential will be issued.")</p>
+        <p id="aya-status" role="status" aria-live="polite">@(ready ? "Check your details to begin." : "Issuance is currently disabled. No credential will be issued.")</p>
         <div id="aya-actions">
-            <button id="check-eligibility" type="button" disabled="@(!Policy.Ready)">Check my eligibility</button>
+            <button id="check-eligibility" type="button" disabled="@(!ready)">Check my eligibility</button>
             <button id="issue-credential" type="button" hidden>Add to Microsoft Authenticator</button>
             <button id="stop-waiting" type="button" class="aya-secondary" hidden>Stop waiting</button>
         </div>

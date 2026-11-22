@@ -384,9 +384,10 @@ public sealed class RevocationTests
     {
         using var f = await Fixture.Create(); await f.ObserveEnabled(); await f.DisableAfter24Hours();
         using var app = new IssuanceTests.TestApp(); using var client = app.CreateClient();
-        var cache = app.Services.GetRequiredService<IMemoryCache>();
+        var store = app.Services.GetRequiredService<AyaIssuanceStateStore>();
         string state = Guid.NewGuid().ToString();
-        cache.Set(state, "{\"status\":\"request_created\"}");
+        Assert.True(store.Begin(state, IssuanceTests.Owner, "presentation", "did:example:synthetic"));
+        Assert.True(store.Bind(state, "synthetic-presentation", DateTimeOffset.UtcNow.AddMinutes(5)));
         var callback = new CallbackEvent
         {
             state = state, requestId = "synthetic-presentation", requestStatus = "presentation_verified",
@@ -400,8 +401,8 @@ public sealed class RevocationTests
         request.Headers.Add("api-key", IssuanceTests.CallbackKey);
         request.Content = new StringContent(JsonConvert.SerializeObject(callback), Encoding.UTF8, "application/json");
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(request)).StatusCode);
-        var saved = JObject.Parse(cache.Get<string>(state));
-        Assert.Equal("presentation_error", saved.Value<string>("status"));
+        Assert.True(store.TryGetStatus(state, IssuanceTests.Owner, "presentation", out var saved));
+        Assert.Equal("presentation_error", saved);
     }
 
     private sealed class Clock : TimeProvider
