@@ -6,11 +6,11 @@ Execute only after the application is reviewed and separately authorized for non
 
 Record the reviewed commit, nonproduction application/slot, synthetic test accounts, supported Authenticator devices and limited test window. Keep `Aya:IssuanceEnabled=false` and `Aya:VerificationEnabled=false` during preparation. Do not use real employee identities. No automatic deployment is introduced; do not run a deployment workflow until separately approved.
 
-## 2. Qualify storage before choosing a path
+## 2. Prepare managed-identity Table request storage
 
-Follow the [storage decision and qualification](request-reliability.md#storage-decision-before-deployment). Identify the actual hosting OS and persistent mount; do not assume `/tmp`, container writable layers or local App Service disk survive recycling. For a custom container, establish the appropriate persistent-storage configuration for that hosting model. Confirm private read/write access, atomic replacement, exclusive writer locking and restart/recycle survival using non-sensitive temporary probe data first. Use one serving instance/process. Keep journal files outside web/static roots and deployment packages. If any required behavior is unproven, stop: use a reviewed alternative adapter before deployment rather than enable issuance.
+Complete the [Table resources, bootstrap, permissions and recovery checklist](table-request-storage.md#owner-only-configuration-in-order). The current runtime uses Table Storage; `Aya:RequestStorePath` no longer selects a filesystem adapter. Provision a dedicated pilot table, initialize its head exactly once, and grant the app's system-assigned managed identity narrowly scoped entity read/write access. Set the three `Aya__RequestTable__*` environment variables. Do not initialize missing state in a previously used ledger. Approve a pilot teardown/retention plan for historical snapshots before activation.
 
-After qualification, set an absolute `Aya:RequestStorePath` to a dedicated private file. On Linux environment settings, use `Aya__RequestStorePath`; colon-delimited names denote the logical .NET configuration keys throughout this checklist. Restrict directory/file access to the application and approved operators. The `.lock` file remains after shutdown as an initialization marker; do not remove it during normal operations. Arrange protected backup and pilot teardown/retention handling.
+Colon-delimited names denote logical .NET keys; Linux environment variables use double underscores. Keep one App Service instance for this attended F1 pilot. Table persistence does not remove F1 quota, cold-start or callback-availability limits. No deployment or activation is authorized by setting these values.
 
 ## 3. Configure the authentication boundary
 
@@ -55,7 +55,7 @@ If using Easy Auth excluded paths, exclude only those exact callback paths, not 
 
 ## 9. Deploy disabled, only after explicit approval
 
-Use the reviewed commit and the separately approved nonproduction deployment procedure. Keep both activation flags false. Verify normal pages load, issuance cannot start and unapproved callers cannot access the verifier. Validate persistence with synthetic local request records and a controlled restart before contacting Request Service. Retain pass/fail evidence, not storage contents. A failing readiness check is a stop condition.
+Use the reviewed commit and the separately approved nonproduction deployment procedure. Keep both activation flags false. Verify normal pages load, issuance cannot start and unapproved callers cannot access the verifier. Complete the disabled Table read check and owner-run synthetic write/conflict/restart qualification described in the Table checklist before contacting Request Service. Retain pass/fail evidence, not storage contents. A failing readiness check is a stop condition.
 
 ## 10. Run the separately approved controlled test window
 

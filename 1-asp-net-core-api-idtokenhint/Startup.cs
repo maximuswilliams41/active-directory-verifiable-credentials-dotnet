@@ -57,10 +57,7 @@ services.AddAntiforgery(options =>
             services.AddSingleton<AyaCredentialPolicy>();
             services.AddSingleton<AyaEmployeeRegistry>();
             services.AddSingleton(TimeProvider.System);
-            services.AddSingleton<IAyaRequestPersistence>(_ => {
-                var path = Configuration["Aya:RequestStorePath"];
-                return string.IsNullOrWhiteSpace(path) ? new UnconfiguredAyaRequestPersistence() : new FileAyaRequestPersistence(path);
-            });
+            services.AddSingleton<IAyaRequestPersistence>(_ => AyaRequestStorageConfiguration.Create(Configuration));
             services.AddSingleton<AyaIssuanceStateStore>();
             services.AddSingleton<AyaRequestConfiguration>();
             services.AddScoped<IVerifiedIdTokenProvider, VerifiedIdTokenProvider>();

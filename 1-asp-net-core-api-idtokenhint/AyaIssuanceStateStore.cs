@@ -17,8 +17,8 @@ namespace AspNetCoreVerifiableCredentials
         {
             if (!Id(id) || string.IsNullOrWhiteSpace(owner) || (kind != "issuance" && kind != "presentation") ||
                 string.IsNullOrWhiteSpace(issuer)) return false;
-            var now = _time.GetUtcNow();
             return _storage.Commit(rows => {
+                var now = _time.GetUtcNow();
                 foreach (var key in rows.Where(p => p.Value.RetainUntil <= now).Select(p => p.Key).ToArray()) rows.Remove(key);
                 if (rows.Count >= 2000 || rows.ContainsKey(id) || rows.Values.Any(r => r.Owner == owner && r.Kind == kind &&
                     r.AcceptUntil > now && !Terminal(r.Status))) return false;
@@ -29,9 +29,10 @@ namespace AspNetCoreVerifiableCredentials
         }
         public bool Bind(string id, string requestId, DateTimeOffset expires)
         {
-            var now = _time.GetUtcNow();
-            if (!Id(id) || string.IsNullOrWhiteSpace(requestId) || requestId.Length > 256 || expires <= now || expires > now.AddMinutes(10)) return false;
+            if (!Id(id) || string.IsNullOrWhiteSpace(requestId) || requestId.Length > 256) return false;
             return _storage.Commit(rows => {
+                var now = _time.GetUtcNow();
+                if (expires <= now || expires > now.AddMinutes(10)) return false;
                 if (!rows.TryGetValue(id, out var row) || row.RequestId != null || row.AcceptUntil <= now) return false;
                 row.RequestId = requestId; row.AcceptUntil = expires.AddMinutes(2);
                 if (row.Pending.Any(e => e.RequestId != requestId || e.Received >= row.AcceptUntil))
@@ -62,8 +63,8 @@ namespace AspNetCoreVerifiableCredentials
         public bool TryGetStatus(string id, string owner, string kind, out string status)
         {
             status = null; if (!Id(id)) return false;
-            var now = _time.GetUtcNow();
             status = _storage.Read(rows => {
+                var now = _time.GetUtcNow();
                 if (!rows.TryGetValue(id, out var row) || row.Kind != kind || row.Owner != owner || row.RetainUntil <= now) return null;
                 if (row.Status == "presentation_verified" && (!row.CredentialExpires.HasValue || row.CredentialExpires <= now)) return "presentation_error";
                 if (!Terminal(row.Status) && row.AcceptUntil <= now) return "outcome_unknown";
@@ -77,8 +78,8 @@ namespace AspNetCoreVerifiableCredentials
             if (callback == null || !Id(callback.state) || string.IsNullOrWhiteSpace(callback.requestId) || callback.requestId.Length > 256 ||
                 !(kind == "issuance" ? new[] { "request_retrieved", "issuance_successful", "issuance_error" } :
                     new[] { "request_retrieved", "presentation_verified", "presentation_error" }).Contains(callback.requestStatus)) return false;
-            var now = _time.GetUtcNow();
             return _storage.Commit(rows => {
+                var now = _time.GetUtcNow();
                 if (!rows.TryGetValue(callback.state, out var row) || row.Kind != kind || row.RetainUntil <= now) return false;
                 string status = callback.requestStatus; DateTimeOffset? credentialExpires = null;
                 if (kind == "presentation" && status == "presentation_verified")

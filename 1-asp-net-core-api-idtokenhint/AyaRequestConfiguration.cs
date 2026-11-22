@@ -20,7 +20,7 @@ namespace AspNetCoreVerifiableCredentials
             try
             {
                 CallbackOrigin();
-                if (string.IsNullOrWhiteSpace(_config["Aya:CallbackApiKey"]) || string.IsNullOrWhiteSpace(_config["Aya:RequestStorePath"]) ||
+                if (string.IsNullOrWhiteSpace(_config["Aya:CallbackApiKey"]) || !AyaRequestStorageConfiguration.IsConfigured(_config) ||
                     !Guid.TryParse(_config["VerifiedID:TenantId"], out var tenant) || tenant == Guid.Empty ||
                     string.IsNullOrWhiteSpace(_config["VerifiedID:DidAuthority"])) return false;
                 if (issuance)

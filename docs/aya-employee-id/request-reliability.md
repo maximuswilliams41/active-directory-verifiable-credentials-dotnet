@@ -1,5 +1,7 @@
 # Controlled pilot request reliability
 
+Current storage: the [Table persistence milestone](table-request-storage.md) supersedes the file-adapter deployment recommendation below. The PR #6 implementation and validation notes remain historical evidence; the file adapter now exists only in tests.
+
 ## Review scope
 
 Based on merged PR #5 / main `1550c26402ebbb8d5050252f32e5971aa2c1ea64`. This milestone prepares a synthetic nonproduction issuance and presentation test. It does not authorize deployment, Microsoft configuration or live issuance. Both issuance and verification flags remain false; validity and storage configuration are unset. No Microsoft service was contacted during implementation.
@@ -18,18 +20,7 @@ Based on merged PR #5 / main `1550c26402ebbb8d5050252f32e5971aa2c1ea64`. This mi
 
 ## Storage decision before deployment
 
-**Recommendation for this controlled, one-instance pilot:** use the file adapter only with a private, owner-qualified persistent filesystem. It is the smallest implementation and adds no package, database service or cloud adapter. This is conditional approval of a storage approach, not evidence that the current Azure mount is suitable.
-
-| Option | Assessment |
-| --- | --- |
-| Memory / temporary App Service disk | Rejected: does not satisfy restart persistence. |
-| Explicit persistent filesystem + one writer | Recommended for the small pilot only after the qualification below. Not supported for multi-instance serving. |
-| SQLite on an unverified shared mount | Not selected: changing formats would not establish correct filesystem locking/durability. |
-| Azure Table storage with conditional updates | Preferred fallback if the available filesystem cannot be qualified, or later scale-out is required. A cloud adapter and its tests would need separate review before use; none is included here. |
-
-The owner must identify OS, hosting model and actual mounted backing storage; verify restart/recycle survival, exclusive locking across processes, atomic replacement, access permissions and backup/recovery; keep exactly one serving process/instance and no overlapping slot use of this journal. Persistent storage alone does not prove these semantics. The implementation demonstrates local process-crash recovery, not power-loss, Azure-host failover or network-filesystem durability. Do not use temporary paths, `wwwroot`, a source checkout or a deployment-package directory. Never delete the lock/journal to bypass an uncertain outcome or active writer; stop the pilot and investigate.
-
-Microsoft distinguishes persistent App Service content storage from temporary local storage in [Windows App Service file access](https://learn.microsoft.com/en-us/azure/app-service/operating-system-functionality). For Linux custom containers, storage behavior depends on [persistent shared-storage configuration](https://learn.microsoft.com/en-us/azure/app-service/configure-custom-container); this does not establish the current host's configuration. [Azure Files lock semantics](https://learn.microsoft.com/en-us/rest/api/storageservices/managing-file-locks) depend on the access protocol. [Table storage design](https://learn.microsoft.com/en-us/azure/storage/tables/table-storage-design) describes the fallback service.
+The current application uses managed-identity Azure Table Storage. Follow the [atomicity design and owner-only resource checklist](table-request-storage.md). The built-in Linux App Service `/home` mount is no longer used for request-state persistence, and setting `Aya:RequestStorePath` has no runtime effect. No Table resources or permissions are created automatically. Deployment and activation remain separate owner approvals.
 
 ## Validation and gates
 
