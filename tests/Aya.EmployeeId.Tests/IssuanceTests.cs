@@ -35,7 +35,7 @@ public sealed class IssuanceTests
         client.DefaultRequestHeaders.Remove("X-MS-CLIENT-PRINCIPAL-ID");
         client.DefaultRequestHeaders.Remove("X-MS-TOKEN-AAD-ACCESS-TOKEN");
         client.DefaultRequestHeaders.Add("X-MS-CLIENT-PRINCIPAL", Principal(owner, role));
-        client.DefaultRequestHeaders.Add("X-MS-CLIENT-PRINCIPAL-ID", owner);
+        client.DefaultRequestHeaders.Add("X-MS-CLIENT-PRINCIPAL-ID", "synthetic-provider-" + owner);
         client.DefaultRequestHeaders.Add("X-MS-TOKEN-AAD-ACCESS-TOKEN", "synthetic-profile-token");
     }
     internal static async Task<HttpResponseMessage> Issue(HttpClient client)
@@ -84,7 +84,7 @@ public sealed class IssuanceTests
     [InlineData("missing")]
     [InlineData("role")]
     [InlineData("malformed")]
-    [InlineData("owner_mismatch")]
+    [InlineData("conflicting_object_ids")]
     public async Task Invalid_identity_cannot_issue_or_poll(string scenario)
     {
         using var app = new TestApp(); using var client = app.CreateClient();
@@ -92,7 +92,14 @@ public sealed class IssuanceTests
         client.DefaultRequestHeaders.Clear();
         if (scenario != "missing") Identity(client, Owner, scenario != "role");
         if (scenario == "malformed") { client.DefaultRequestHeaders.Remove("X-MS-CLIENT-PRINCIPAL"); client.DefaultRequestHeaders.Add("X-MS-CLIENT-PRINCIPAL", "invalid-base64"); }
-        if (scenario == "owner_mismatch") { client.DefaultRequestHeaders.Remove("X-MS-CLIENT-PRINCIPAL-ID"); client.DefaultRequestHeaders.Add("X-MS-CLIENT-PRINCIPAL-ID", Other); }
+        if (scenario == "conflicting_object_ids") {
+            var principal = JObject.Parse(Encoding.UTF8.GetString(Convert.FromBase64String(Principal(Owner))));
+            ((JArray)principal["claims"]).Add(new JObject {
+                ["typ"] = "http://schemas.microsoft.com/identity/claims/objectidentifier", ["val"] = Other
+            });
+            client.DefaultRequestHeaders.Remove("X-MS-CLIENT-PRINCIPAL");
+            client.DefaultRequestHeaders.Add("X-MS-CLIENT-PRINCIPAL", Convert.ToBase64String(Encoding.UTF8.GetBytes(principal.ToString())));
+        }
         Assert.Equal(HttpStatusCode.Unauthorized, (await Issue(client)).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/request-status?id=" + state)).StatusCode);
         Assert.Equal(1, app.Outbound.IssuanceCalls);
