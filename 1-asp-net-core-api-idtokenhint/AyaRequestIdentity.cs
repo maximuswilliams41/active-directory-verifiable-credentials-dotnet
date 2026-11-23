@@ -35,7 +35,11 @@ namespace AspNetCoreVerifiableCredentials
             try
             {
                 var header = context.Request.Headers["X-MS-CLIENT-PRINCIPAL"].ToString();
-                if (string.IsNullOrWhiteSpace(header) || header.Length > 32768)
+                // Easy Auth's provider identifier is opaque, not necessarily the Entra oid.
+                // Require its presence, but derive ownership only from validated Entra claims.
+                var providerId = context.Request.Headers["X-MS-CLIENT-PRINCIPAL-ID"];
+                if (string.IsNullOrWhiteSpace(header) || header.Length > 32768 ||
+                    providerId.Count != 1 || string.IsNullOrWhiteSpace(providerId[0]))
                     throw new UnauthorizedAccessException();
                 var claims = JObject.Parse(Encoding.UTF8.GetString(Convert.FromBase64String(header)))["claims"] as JArray;
                 var ids = claims?.OfType<JObject>().Where(c =>
@@ -44,8 +48,7 @@ namespace AspNetCoreVerifiableCredentials
                     .Select(c => c.Value<string>("val")).ToArray();
                 if (ids == null || ids.Length == 0 ||
                     !Guid.TryParse(ids[0], out var owner) || owner == Guid.Empty ||
-                    ids.Any(id => !Guid.TryParse(id, out var parsed) || parsed != owner) ||
-                    !Guid.TryParse(context.Request.Headers["X-MS-CLIENT-PRINCIPAL-ID"], out var headerOwner) || headerOwner != owner)
+                    ids.Any(id => !Guid.TryParse(id, out var parsed) || parsed != owner))
                     throw new UnauthorizedAccessException();
                 bool permitted = claims.OfType<JObject>().Any(c =>
                     (c.Value<string>("typ") == "roles" || c.Value<string>("typ") == "role" ||
