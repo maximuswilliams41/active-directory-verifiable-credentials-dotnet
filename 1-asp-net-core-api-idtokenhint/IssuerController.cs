@@ -221,7 +221,7 @@ public async Task<ActionResult> IssuanceRequest()
                 var salt = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
                 SetPinCode(request, Sha256Hash(salt + pinCode), 6, salt);
             }
-            request.expirationDate = _policy.Expiration(_time.GetUtcNow()).ToString("O");
+            // Omit expirationDate so the selected contract's validityInterval governs expiry.
             return request;
         }
         [NonAction]
