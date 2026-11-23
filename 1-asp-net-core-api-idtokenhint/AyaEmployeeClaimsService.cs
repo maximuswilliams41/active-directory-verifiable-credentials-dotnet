@@ -34,7 +34,7 @@ namespace AspNetCoreVerifiableCredentials
             var employeeKey = _registry.RequireActiveKey(tenant, Guid.Parse(objectId));
             string token = context.Request.Headers["X-MS-TOKEN-AAD-ACCESS-TOKEN"].ToString();
             if (string.IsNullOrWhiteSpace(token))
-                throw new UnauthorizedAccessException("Authenticated employee session required.");
+                throw new AyaEligibilityDeniedException(AyaEligibilityReason.GraphTokenMissing);
 
             // Graph returns the authenticated user's record.
             string url =
@@ -64,35 +64,34 @@ namespace AspNetCoreVerifiableCredentials
                 objectId,
                 user.Value<string>("id"),
                 StringComparison.OrdinalIgnoreCase))
-                throw new UnauthorizedAccessException(
-                    "Employee identity mismatch.");
+                throw new AyaEligibilityDeniedException(AyaEligibilityReason.GraphObjectIdMismatch);
 
-            if (user.Value<string>("userType") != "Member" ||
-                user["accountEnabled"]?.Type != JTokenType.Boolean || user.Value<bool?>("accountEnabled") != true)
-                throw new UnauthorizedAccessException(
-                    "Employee account required.");
+            if (user.Value<string>("userType") != "Member")
+                throw new AyaEligibilityDeniedException(AyaEligibilityReason.GraphUserTypeNotMember);
+            if (user["accountEnabled"]?.Type != JTokenType.Boolean)
+                throw new AyaEligibilityDeniedException(AyaEligibilityReason.GraphAccountStateUnconfirmed);
+            if (user.Value<bool?>("accountEnabled") != true)
+                throw new AyaEligibilityDeniedException(AyaEligibilityReason.GraphAccountDisabled);
 
-            string Required(string field)
+            string Required(string field, AyaEligibilityReason reason)
             {
                 string value = user.Value<string>(field);
                 if (string.IsNullOrWhiteSpace(value))
-                    throw new InvalidOperationException(
-                        "Required employee attribute missing: " + field);
+                    throw new AyaEligibilityIncompleteException(reason);
                 return value;
             }
 
-            string company = Required("companyName");
+            string company = Required("companyName", AyaEligibilityReason.CompanyNameMissing);
 
             if (!string.Equals(
                 company, "Aya Living Inc.",
                 StringComparison.OrdinalIgnoreCase))
-                throw new UnauthorizedAccessException(
-                    "Aya employee record required.");
+                throw new AyaEligibilityDeniedException(AyaEligibilityReason.CompanyMismatch);
 
             var claims = new Dictionary<string, string>
             {
-                ["displayName"] = Required("displayName"),
-                ["employeeId"] = Required("employeeId"),
+                ["displayName"] = Required("displayName", AyaEligibilityReason.DisplayNameMissing),
+                ["employeeId"] = Required("employeeId", AyaEligibilityReason.EmployeeIdMissing),
                 ["companyName"] = company,
                 ["ayaEmployeeKey"] = employeeKey
             };

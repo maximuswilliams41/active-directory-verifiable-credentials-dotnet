@@ -20,12 +20,16 @@ namespace AspNetCoreVerifiableCredentials
         public string RequireActiveKey(Guid tenant, Guid account)
         {
             var rows = _rows;
-            if (rows.Any(r => r.Tenant == Guid.Empty || r.Account == Guid.Empty || r.Key == Guid.Empty) ||
-                rows.GroupBy(r => r.Key).Any(g => g.Count() != 1) ||
-                rows.GroupBy(r => (r.Tenant, r.Account)).Any(g => g.Count() != 1))
-                throw new InvalidOperationException("Employee registry requires administrator review.");
+            if (rows.Any(r => r.Tenant == Guid.Empty || r.Account == Guid.Empty || r.Key == Guid.Empty))
+                throw new AyaEligibilityIncompleteException(AyaEligibilityReason.RegistryInvalidEntry);
+            if (rows.GroupBy(r => r.Key).Any(g => g.Count() != 1))
+                throw new AyaEligibilityIncompleteException(AyaEligibilityReason.RegistryDuplicateKey);
+            if (rows.GroupBy(r => (r.Tenant, r.Account)).Any(g => g.Count() != 1))
+                throw new AyaEligibilityIncompleteException(AyaEligibilityReason.RegistryDuplicateAccount);
+            if (rows.Length == 0) throw new AyaEligibilityDeniedException(AyaEligibilityReason.RegistryEmpty);
             var match = rows.SingleOrDefault(r => r.Tenant == tenant && r.Account == account);
-            if (match == null || !match.Active) throw new UnauthorizedAccessException("Employee is not eligible.");
+            if (match == null) throw new AyaEligibilityDeniedException(AyaEligibilityReason.RegistryNoMatch);
+            if (!match.Active) throw new AyaEligibilityDeniedException(AyaEligibilityReason.RegistryInactive);
             return match.Key.ToString("D");
         }
         private static Guid Parse(string value) => Guid.TryParseExact(value, "D", out var id) ? id : Guid.Empty;
