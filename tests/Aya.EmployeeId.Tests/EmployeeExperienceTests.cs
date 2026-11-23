@@ -79,25 +79,55 @@ public sealed class EmployeeExperienceTests
     [Theory]
     [InlineData(180)]
     [InlineData(365)]
-    public async Task Configured_test_duration_maps_to_exact_claims_type_expiry_and_hashed_desktop_pin(int days)
+    public async Task Configured_test_duration_preserves_claims_type_and_hashed_pin_without_expiry_override(int days)
     {
         using var app = new IssuanceTests.TestApp(); app.Overrides["Aya:CredentialValidityDays"] = days.ToString();
         using var client = app.CreateClient(); IssuanceTests.Identity(client);
-        var before = DateTimeOffset.UtcNow;
         var response = await IssuanceTests.Issue(client);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("AyaEmployeeId", app.Outbound.LastRequest.Value<string>("type"));
         Assert.Equal("Aya Living", app.Outbound.LastRequest["registration"].Value<string>("clientName"));
         Assert.Equal(new[] { "ayaEmployeeKey", "companyName", "displayName", "employeeId" }, app.Outbound.LastClaims.Properties().Select(p => p.Name).Order().ToArray());
         Assert.Equal(IssuanceTests.EmployeeKey, app.Outbound.LastClaims.Value<string>("ayaEmployeeKey"));
-        var expiry = app.Outbound.LastRequest["expirationDate"].ToObject<DateTimeOffset>();
-        Assert.InRange(expiry, before.AddDays(days), DateTimeOffset.UtcNow.AddDays(days));
+        Assert.Null(app.Outbound.LastRequest.Property("expirationDate"));
         var pin = JObject.Parse(await response.Content.ReadAsStringAsync()).Value<string>("pin");
         Assert.Matches("^[0-9]{6}$", pin);
         Assert.NotEqual(pin, app.Outbound.LastRequest["pin"].Value<string>("value"));
         Assert.Equal("sha256", app.Outbound.LastRequest["pin"].Value<string>("alg"));
         Assert.True(response.Headers.CacheControl.NoStore);
         Assert.DoesNotContain(app.Logs.Entries, value => value.Contains(IssuanceTests.EmployeeKey) || value.Contains(pin));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Seven_day_pilot_serializes_no_expiration_override_on_desktop_or_mobile(bool mobile)
+    {
+        using var app = new IssuanceTests.TestApp(); app.Overrides["Aya:CredentialValidityDays"] = "7";
+        using var client = app.CreateClient(); IssuanceTests.Identity(client);
+        if (mobile) {
+            client.DefaultRequestHeaders.UserAgent.Clear();
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("SyntheticBrowser/1.0 (Android)");
+        }
+
+        var response = await IssuanceTests.Issue(client);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        // LastRequest is parsed from the actual serialized outgoing HTTP body.
+        // Property(), unlike a null-value check, also rejects expirationDate: null.
+        var request = app.Outbound.LastRequest;
+        Assert.Null(request.Property("expirationDate"));
+        Assert.Equal("AyaEmployeeId", request.Value<string>("type"));
+        Assert.Equal("https://verifiedid.did.msidentity.com/v1.0/tenants/" + IssuanceTests.Tenant +
+            "/verifiableCredentials/contracts/synthetic/manifest", request.Value<string>("manifest"));
+        Assert.Equal(new[] { "ayaEmployeeKey", "companyName", "displayName", "employeeId" },
+            app.Outbound.LastClaims.Properties().Select(p => p.Name).Order().ToArray());
+        Assert.Equal(IssuanceTests.EmployeeKey, app.Outbound.LastClaims.Value<string>("ayaEmployeeKey"));
+        var result = JObject.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(result.Value<string>("id"), request["callback"].Value<string>("state"));
+        Assert.Equal("https://pilot.example.invalid/api/issuer/issuecallback", request["callback"].Value<string>("url"));
+        Assert.Equal(IssuanceTests.CallbackKey, request["callback"]["headers"].Value<string>("api-key"));
+        Assert.Equal(mobile, request.Property("pin") == null);
+        Assert.Equal(1, app.Outbound.IssuanceCalls);
     }
 
     [Fact]
