@@ -282,7 +282,13 @@ public sealed class IssuanceTests
     internal sealed class FakeTokens : IVerifiedIdTokenProvider
     {
         public int Calls;
-        public Task<(string token,string error,string error_description)> GetAccessToken() { Calls++; return Task.FromResult(("synthetic-service-token", "", "")); }
+        public string Token = "synthetic-service-token";
+        public Exception Failure;
+        public Task<(string token,string error,string error_description)> GetAccessToken()
+        {
+            Calls++; if (Failure != null) throw Failure;
+            return Task.FromResult((Token, "synthetic-private-token-error", "synthetic-private-token-detail"));
+        }
     }
     internal sealed class FakeOutbound : HttpMessageHandler, IHttpClientFactory
     {
@@ -294,6 +300,7 @@ public sealed class IssuanceTests
         public int PresentationCalls;
         public Func<JObject, Task> BeforeResponse;
         public Action<JObject> ProfileTransform;
+        public Func<Task<HttpResponseMessage>> IssuanceResponse;
         public HttpClient CreateClient(string name) => new(this, false);
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -311,6 +318,7 @@ public sealed class IssuanceTests
             {
                 IssuanceCalls++; LastRequest = JObject.Parse(await request.Content.ReadAsStringAsync(cancellationToken)); LastClaims = (JObject)LastRequest["claims"];
                 if (BeforeResponse != null) await BeforeResponse(LastRequest);
+                if (IssuanceResponse != null) return await IssuanceResponse();
                 if (Mode == "service_error") return Json(HttpStatusCode.BadRequest, new { error = "synthetic-private-detail" });
                 return Json(HttpStatusCode.Created, new { requestId = Mode == "missing_request_id" ? null : "synthetic-request",
                     expiry = DateTimeOffset.UtcNow.AddMinutes(Mode == "expired_response" ? -1 : 5).ToUnixTimeSeconds(), url = "openid://vc?request_uri=https://verifiedid.did.msidentity.com/synthetic" });
