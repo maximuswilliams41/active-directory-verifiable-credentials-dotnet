@@ -19,7 +19,7 @@ public sealed class IssuanceDiagnosticTests
         ["url"] = "openid://vc?request_uri=https://verifiedid.did.msidentity.com/" + Canary,
         ["qrCode"] = Canary, ["privateServiceDetail"] = Canary
     };
-    private static string AssertDiagnostic(IssuanceTests.TestApp app, HttpResponseMessage response,
+    internal static string AssertDiagnostic(IssuanceTests.TestApp app, HttpResponseMessage response,
         AyaIssuanceReason reason, AyaIssuanceStage stage, int? serviceStatus = null)
     {
         var events = app.Logs.Events.Where(e => e.EventId == 7200).ToArray();
@@ -36,10 +36,11 @@ public sealed class IssuanceDiagnosticTests
         foreach (var entry in events) {
             Assert.Null(entry.Error);
             Assert.Equal(id, entry.Fields["IssuanceCorrelationId"]);
-            Assert.Equal(new[] { "HttpStatus", "IssuanceCorrelationId", "ReasonCode", "ServiceHttpStatus", "Stage", "{OriginalFormat}" },
+            Assert.Equal(new[] { "HttpStatus", "IssuanceCorrelationId", "ReasonCode", "ServiceHttpStatus", "Stage", "ValidationReason", "{OriginalFormat}" },
                 entry.Fields.Keys.Order(StringComparer.Ordinal).ToArray());
             Assert.IsType<AyaIssuanceReason>(entry.Fields["ReasonCode"]);
             Assert.IsType<AyaIssuanceStage>(entry.Fields["Stage"]);
+            Assert.IsType<AyaResponseValidationReason>(entry.Fields["ValidationReason"]);
         }
         var forbidden = new List<string> { Canary, IssuanceTests.Owner, IssuanceTests.Tenant, IssuanceTests.EmployeeKey,
             IssuanceTests.CallbackKey, "Synthetic Fixture", "SYNTHETIC-001", "Aya Living Inc.", "synthetic-profile-token",

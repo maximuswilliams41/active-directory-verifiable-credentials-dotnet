@@ -29,6 +29,7 @@ namespace AspNetCoreVerifiableCredentials
         private int _httpStatus = 500;
         public AyaIssuanceStage Stage { get; set; } = AyaIssuanceStage.Configuration;
         public int? ServiceHttpStatus { get; set; }
+        public AyaResponseValidationReason ValidationReason { get; set; }
         public AyaIssuanceDiagnostic(ILogger log, HttpResponse response)
         {
             _log = log;
@@ -39,7 +40,7 @@ namespace AspNetCoreVerifiableCredentials
         public void Dispose() => Write(_reason, _httpStatus, _httpStatus >= 400 ? LogLevel.Warning : LogLevel.Information);
         private void Write(AyaIssuanceReason reason, int? httpStatus, LogLevel level) =>
             _log.Log(level, new EventId(7200, "AyaIssuance"),
-                "Aya issuance {IssuanceCorrelationId} {ReasonCode} stage {Stage} HTTP {HttpStatus} service HTTP {ServiceHttpStatus}",
-                _id, reason, Stage, httpStatus, ServiceHttpStatus is >= 100 and <= 599 ? ServiceHttpStatus : null);
+                "Aya issuance {IssuanceCorrelationId} {ReasonCode} stage {Stage} HTTP {HttpStatus} service HTTP {ServiceHttpStatus} validation {ValidationReason}",
+                _id, reason, Stage, httpStatus, ServiceHttpStatus is >= 100 and <= 599 ? ServiceHttpStatus : null, ValidationReason);
     }
 }

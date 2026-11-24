@@ -9,7 +9,7 @@ Microsoft request ID and callback state. Response JSON and HTTP status behavior
 are unchanged; the response header is the only new client-visible diagnostic.
 
 The event has exactly these structured fields: `IssuanceCorrelationId`,
-`ReasonCode`, `Stage`, `HttpStatus`, `ServiceHttpStatus` (plus the logger's fixed
+`ReasonCode`, `Stage`, `HttpStatus`, `ServiceHttpStatus`, `ValidationReason` (plus the logger's fixed
 message template). `Started` is Information level, with no HTTP statuses yet.
 The terminal event is Warning for unsuccessful responses and Information for 200.
 Reasons and stages are closed enums. No exception object/message, payload, header,
@@ -97,3 +97,57 @@ closed structured fields, no logged exception object and exclusion of synthetic
 sensitive values. Existing Table SDK/ETag and authorization regressions remain in
 the complete suite. These tests validate application logging; they do not certify
 third-party middleware, platform logs or independently configured telemetry.
+
+## Response-validation detail
+
+Event 7200 also includes `ValidationReason`, a closed enum. Existing reason codes,
+stages, HTTP behavior and correlation remain unchanged. It identifies the first
+failed check; no response value or length is recorded. `None` means no failure was
+attributed to these checks, not that credential issuance completed.
+
+| ValidationReason | Check |
+| --- | --- |
+| `UrlValueInvalid` | JSON URL value could not be read using the existing conversion |
+| `UrlMissing`, `UrlTooLong`, `UrlPrefixRejected` | Missing URL, existing 8192-character bound, or exact protocol prefix |
+| `UrlQueryInvalid` | Query parsing threw |
+| `RequestUriMissing`, `RequestUriAmbiguous`, `RequestUriInvalid` | Required single absolute request URI |
+| `RequestUriSchemeRejected`, `RequestUriHostRejected` | Existing HTTPS and approved-host checks |
+| `RequestUriPortRejected`, `RequestUriUserInfoRejected`, `RequestUriFragmentRejected` | Existing default-port, no-userinfo and no-fragment checks |
+| `ExpiryMissing`, `ExpiryNotInteger`, `ExpiryOutOfRange` | Missing expiry, existing Int64 parsing, or Unix-seconds conversion range |
+
+For a separately approved future test, capture the same correlation header and
+fixed event fields described above, adding only `ValidationReason`. Do not capture
+or share the URL, request ID, body, QR, PIN, token, exception or employee fields.
+A failure during unknown-state recording can instead produce `StorageUnavailable`
+at `OutcomeRecording`; `ValidationReason` then retains the preceding check detail.
+
+### Compatibility review
+
+Reviewed against the public [Microsoft issuance response specification](https://learn.microsoft.com/en-us/entra/verified-id/issuance-request-api#successful-response).
+It documents HTTP 201, string `requestId` and `url`, integer `expiry`, and QR output.
+Its URL example uses the issuance prefix and request-URI host accepted here; its
+expiry example is consistent with Unix seconds. A synthetic version of that shape
+with current expiry passes. This documents compatibility with the example, not a
+guarantee that every live response matches it. The reference does not enumerate
+all permitted deep-link variations or promise Aya's ten-minute expiry bound.
+
+Aya still checks exact prefix/host and URI structure before returning a wallet
+link. Missing or nonnumeric expiry fails at response validation; an integer outside
+the Unix-seconds conversion range does too. A numeric millisecond timestamp would
+also fail conversion at current dates; this is a tested hypothesis, not evidence
+of Microsoft's actual response. The request expiry is separate from credential
+validity; changing the credential's lifespan is not a correction for this check.
+
+`requestId` reading and binding occur only after URL and expiry conversion pass.
+Binding rejects missing/oversized service IDs, an expiry that is past or more than
+ten minutes ahead, absent/already-bound/expired local state, and inconsistent early
+callbacks. The same specification's [callback section](https://learn.microsoft.com/en-us/entra/verified-id/issuance-request-api#callback-events)
+documents returning the original state and the service request ID. Aya's additional
+ordering, retention and duplicate controls remain local policies.
+
+`ResponseValidationFailed` at `ResponseValidation` with service HTTP 201 establishes
+that a response was received and parsed as an object, then rejected before binding.
+It does not establish which URL/expiry predicate failed, nor demonstrate callback
+reachability or successful credential issuance. Request-ID binding and callback
+correlation cannot be the direct cause of that specific event. No compatibility
+relaxation is included in this diagnostic-only change.
