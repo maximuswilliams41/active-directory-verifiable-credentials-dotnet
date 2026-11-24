@@ -143,13 +143,27 @@ public async Task<ActionResult> IssuanceRequest()
                 }
                 var data = JObject.Parse(await response.Content.ReadAsStringAsync());
                 diagnostic.Stage = AyaIssuanceStage.ResponseValidation;
-                if (!AyaRequestLinks.Valid(data.Value<string>("url"), "issuance") ||
-                    !long.TryParse(data["expiry"]?.ToString(), out var expiry))
+                diagnostic.ValidationReason = AyaResponseValidationReason.UrlValueInvalid;
+                var url = data.Value<string>("url");
+                var linkReason = AyaResponseValidationReason.None;
+                bool linkValid;
+                try { linkValid = AyaRequestLinks.Valid(url, "issuance", out linkReason); }
+                finally { diagnostic.ValidationReason = linkReason; }
+                if (!linkValid)
                 {
                     MarkUnknown(); diagnostic.Stage = AyaIssuanceStage.ResponseValidation;
                     return Done(AyaIssuanceReason.ResponseValidationFailed, 502, StatusCode(502, new { error = "invalid_service_response", id = pendingId }));
                 }
+                diagnostic.ValidationReason = data["expiry"] == null || data["expiry"].Type == JTokenType.Null
+                    ? AyaResponseValidationReason.ExpiryMissing : AyaResponseValidationReason.ExpiryNotInteger;
+                if (!long.TryParse(data["expiry"]?.ToString(), out var expiry))
+                {
+                    MarkUnknown(); diagnostic.Stage = AyaIssuanceStage.ResponseValidation;
+                    return Done(AyaIssuanceReason.ResponseValidationFailed, 502, StatusCode(502, new { error = "invalid_service_response", id = pendingId }));
+                }
+                diagnostic.ValidationReason = AyaResponseValidationReason.ExpiryOutOfRange;
                 var expires = DateTimeOffset.FromUnixTimeSeconds(expiry);
+                diagnostic.ValidationReason = AyaResponseValidationReason.None;
                 diagnostic.Stage = AyaIssuanceStage.StateBinding;
                 if (!_issuanceStates.Bind(pendingId, data.Value<string>("requestId"), expires))
                 {
