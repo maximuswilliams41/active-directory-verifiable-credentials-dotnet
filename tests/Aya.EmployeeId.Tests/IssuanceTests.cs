@@ -231,6 +231,7 @@ public sealed class IssuanceTests
         public readonly CapturedLogs Logs = new();
         public bool Enabled = true;
         public IAyaRequestPersistence Persistence;
+        public AyaEmployeeRegistry Registry;
         public string ConfiguredKey = CallbackKey;
         public readonly Dictionary<string,string> Overrides = new();
         private IHost _host;
@@ -263,6 +264,7 @@ public sealed class IssuanceTests
             }).AddInMemoryCollection(Overrides));
             builder.ConfigureLogging(log => { log.ClearProviders(); log.AddProvider(Logs); log.SetMinimumLevel(LogLevel.Trace); });
             builder.ConfigureServices(services => {
+                if (Registry != null) { services.RemoveAll<AyaEmployeeRegistry>(); services.AddSingleton(Registry); }
                 services.RemoveAll<IAyaRequestPersistence>();
                 services.AddSingleton<IAyaRequestPersistence>(sp => Persistence ??
                     (AyaRequestStorageConfiguration.IsConfigured(sp.GetRequiredService<IConfiguration>())
@@ -291,6 +293,7 @@ public sealed class IssuanceTests
         public int GraphCalls;
         public int PresentationCalls;
         public Func<JObject, Task> BeforeResponse;
+        public Action<JObject> ProfileTransform;
         public HttpClient CreateClient(string name) => new(this, false);
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -298,9 +301,11 @@ public sealed class IssuanceTests
             {
                 GraphCalls++;
                 if (Mode == "graph_error") return new(HttpStatusCode.ServiceUnavailable);
-                return Json(HttpStatusCode.OK, new { accountEnabled = Mode == "unknown_enabled" ? (bool?)null : Mode != "disabled", id = Mode == "mismatch" ? Other : Owner, userType = Mode == "guest" ? "Guest" : "Member",
+                var profile = JObject.FromObject(new { accountEnabled = Mode == "unknown_enabled" ? (bool?)null : Mode != "disabled", id = Mode == "mismatch" ? Other : Owner, userType = Mode == "guest" ? "Guest" : "Member",
                     companyName = Mode == "company" ? "Synthetic Other" : "Aya Living Inc.", givenName = "Synthetic", surname = "Fixture", displayName = "Synthetic Fixture",
                     employeeId = Mode == "missing_attribute" ? "" : "SYNTHETIC-001", mail = "fixture@example.invalid" });
+                ProfileTransform?.Invoke(profile);
+                return Json(HttpStatusCode.OK, profile);
             }
             if (request.RequestUri.Host == "service.invalid" && request.RequestUri.AbsolutePath == "/createIssuanceRequest")
             {
@@ -325,13 +330,19 @@ public sealed class IssuanceTests
     internal sealed class CapturedLogs : ILoggerProvider
     {
         public readonly System.Collections.Concurrent.ConcurrentQueue<string> Entries = new();
-        public ILogger CreateLogger(string category) => new Capture(Entries, category.StartsWith("AspNetCoreVerifiableCredentials"));
+        public readonly System.Collections.Concurrent.ConcurrentQueue<(int EventId, Dictionary<string, object> Fields, Exception Error)> Events = new();
+        public ILogger CreateLogger(string category) => new Capture(Entries, Events, category.StartsWith("AspNetCoreVerifiableCredentials"));
         public void Dispose() { }
-        private sealed class Capture(System.Collections.Concurrent.ConcurrentQueue<string> entries, bool capture) : ILogger
+        private sealed class Capture(System.Collections.Concurrent.ConcurrentQueue<string> entries,
+            System.Collections.Concurrent.ConcurrentQueue<(int EventId, Dictionary<string, object> Fields, Exception Error)> events, bool capture) : ILogger
         {
             public IDisposable BeginScope<TState>(TState state) => null;
             public bool IsEnabled(LogLevel level) => capture;
-            public void Log<TState>(LogLevel level, EventId id, TState state, Exception exception, Func<TState,Exception,string> formatter) { if (capture) entries.Enqueue(formatter(state, exception)); }
+            public void Log<TState>(LogLevel level, EventId id, TState state, Exception exception, Func<TState,Exception,string> formatter) {
+                if (!capture) return;
+                entries.Enqueue(formatter(state, exception));
+                if (state is IEnumerable<KeyValuePair<string, object>> fields) events.Enqueue((id.Id, fields.ToDictionary(p => p.Key, p => p.Value), exception));
+            }
         }
     }
 }
