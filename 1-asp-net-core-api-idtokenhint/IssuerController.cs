@@ -83,47 +83,104 @@ _apiKey = _configuration["Aya:CallbackApiKey"];
 [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public async Task<ActionResult> IssuanceRequest()
         {
-            if (!_policy.IssuanceEnabled) return StatusCode(503, new { error = "issuance_disabled" });
-            if (!_policy.ValidityDays.HasValue) return StatusCode(503, new { error = "validity_not_configured" });
-            var configuration = new AyaRequestConfiguration(_configuration);
-            if (!configuration.Ready(true)) return StatusCode(503, new { error = "request_not_configured" });
-            try { AyaRequestIdentity.RequireOwner(HttpContext); }
-            catch (UnauthorizedAccessException) { return Unauthorized(); }
+            using var diagnostic = new AyaIssuanceDiagnostic(_log, Response);
+            ActionResult Done(AyaIssuanceReason reason, int status, ActionResult result)
+            { diagnostic.Outcome(reason, status); return result; }
             string pendingId = null;
+            void MarkUnknown()
+            {
+                diagnostic.Stage = AyaIssuanceStage.OutcomeRecording;
+                try { _issuanceStates.Unknown(pendingId); }
+                catch (AyaStorageException) { diagnostic.Outcome(AyaIssuanceReason.StorageUnavailable, 503); throw; }
+            }
+            if (!_policy.IssuanceEnabled) return Done(AyaIssuanceReason.IssuanceDisabled, 503, StatusCode(503, new { error = "issuance_disabled" }));
+            if (!_policy.ValidityDays.HasValue) return Done(AyaIssuanceReason.ValidityUnconfigured, 503, StatusCode(503, new { error = "validity_not_configured" }));
+            var configuration = new AyaRequestConfiguration(_configuration);
+            if (!configuration.Ready(true)) return Done(AyaIssuanceReason.RequestNotConfigured, 503, StatusCode(503, new { error = "request_not_configured" }));
+            diagnostic.Stage = AyaIssuanceStage.Identity;
+            try { AyaRequestIdentity.RequireOwner(HttpContext); }
+            catch (UnauthorizedAccessException) { return Done(AyaIssuanceReason.IdentityDenied, 401, Unauthorized()); }
             try
             {
                 // Probe persistence before any remote operation, including the profile lookup.
+                diagnostic.Stage = AyaIssuanceStage.StorageRead;
                 _issuanceStates.CheckStorage();
+                diagnostic.Stage = AyaIssuanceStage.EmployeeClaims;
                 var claims = await _ayaClaims.GetClaimsAsync(HttpContext);
                 var owner = configuration.Owner(HttpContext);
+                diagnostic.Stage = AyaIssuanceStage.RequestCreation;
                 var request = CreateIssuanceRequest(out string pinCode);
-                if (!_issuanceStates.Begin(request.callback.state, owner, "issuance", request.authority))
-                    return Conflict(new { error = "request_already_active" });
+                diagnostic.Stage = AyaIssuanceStage.StateBegin;
+                var begin = _issuanceStates.BeginWithResult(request.callback.state, owner, "issuance", request.authority);
+                if (begin != AyaRequestBeginResult.Started)
+                    return Done(begin switch {
+                        AyaRequestBeginResult.AlreadyActive => AyaIssuanceReason.RequestAlreadyActive,
+                        AyaRequestBeginResult.CapacityReached => AyaIssuanceReason.StateCapacityReached,
+                        AyaRequestBeginResult.DuplicateId => AyaIssuanceReason.StateIdConflict,
+                        _ => AyaIssuanceReason.StateArgumentsInvalid
+                    }, 409, Conflict(new { error = "request_already_active" }));
                 pendingId = request.callback.state;
+                diagnostic.Stage = AyaIssuanceStage.TokenAcquisition;
                 var accessToken = await _tokens.GetAccessToken();
                 if (string.IsNullOrWhiteSpace(accessToken.token))
-                { _issuanceStates.Unknown(pendingId); return StatusCode(502, new { error = "token_unavailable", id = pendingId }); }
+                {
+                    MarkUnknown(); diagnostic.Stage = AyaIssuanceStage.TokenAcquisition;
+                    return Done(AyaIssuanceReason.TokenUnavailable, 502, StatusCode(502, new { error = "token_unavailable", id = pendingId }));
+                }
                 request.claims = claims;
+                diagnostic.Stage = AyaIssuanceStage.ServiceRequestPreparation;
                 using var message = new HttpRequestMessage(HttpMethod.Post, $"{_configuration["VerifiedID:ApiEndpoint"]}createIssuanceRequest");
                 message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.token);
                 message.Content = new StringContent(JsonConvert.SerializeObject(request, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore }), Encoding.UTF8, "application/json");
+                diagnostic.Stage = AyaIssuanceStage.ServiceRequest;
                 using var response = await _httpClientFactory.CreateClient().SendAsync(message);
+                diagnostic.ServiceHttpStatus = (int)response.StatusCode;
+                diagnostic.Stage = AyaIssuanceStage.ServiceResponse;
                 if (response.StatusCode != HttpStatusCode.Created)
-                { _issuanceStates.Unknown(pendingId); return BadRequest(new { error = "request_outcome_unknown", id = pendingId }); }
+                {
+                    MarkUnknown(); diagnostic.Stage = AyaIssuanceStage.ServiceResponse;
+                    return Done(AyaIssuanceReason.ServiceRejected, 400, BadRequest(new { error = "request_outcome_unknown", id = pendingId }));
+                }
                 var data = JObject.Parse(await response.Content.ReadAsStringAsync());
+                diagnostic.Stage = AyaIssuanceStage.ResponseValidation;
                 if (!AyaRequestLinks.Valid(data.Value<string>("url"), "issuance") ||
-                    !long.TryParse(data["expiry"]?.ToString(), out var expiry) ||
-                    !_issuanceStates.Bind(pendingId, data.Value<string>("requestId"), DateTimeOffset.FromUnixTimeSeconds(expiry)))
-                { _issuanceStates.Unknown(pendingId); return StatusCode(502, new { error = "invalid_service_response", id = pendingId }); }
-                return Ok(new { id = pendingId, url = data.Value<string>("url"), expiry, statusExpiry = expiry + 120, pin = pinCode });
+                    !long.TryParse(data["expiry"]?.ToString(), out var expiry))
+                {
+                    MarkUnknown(); diagnostic.Stage = AyaIssuanceStage.ResponseValidation;
+                    return Done(AyaIssuanceReason.ResponseValidationFailed, 502, StatusCode(502, new { error = "invalid_service_response", id = pendingId }));
+                }
+                var expires = DateTimeOffset.FromUnixTimeSeconds(expiry);
+                diagnostic.Stage = AyaIssuanceStage.StateBinding;
+                if (!_issuanceStates.Bind(pendingId, data.Value<string>("requestId"), expires))
+                {
+                    MarkUnknown(); diagnostic.Stage = AyaIssuanceStage.StateBinding;
+                    return Done(AyaIssuanceReason.StateBindingFailed, 502, StatusCode(502, new { error = "invalid_service_response", id = pendingId }));
+                }
+                return Done(AyaIssuanceReason.RequestCreated, 200, Ok(new { id = pendingId, url = data.Value<string>("url"), expiry, statusExpiry = expiry + 120, pin = pinCode }));
             }
-            catch (AyaStorageException) { throw; }
-            catch (UnauthorizedAccessException) { return StatusCode(403, new { error = "employee_not_eligible" }); }
-            catch (InvalidOperationException) when (pendingId == null) { return Conflict(new { error = "incomplete_employee_profile" }); }
+            catch (AyaStorageException) { diagnostic.Outcome(AyaIssuanceReason.StorageUnavailable, 503); throw; }
+            catch (UnauthorizedAccessException) { return Done(AyaIssuanceReason.EmployeeNotEligible, 403, StatusCode(403, new { error = "employee_not_eligible" })); }
+            catch (InvalidOperationException) when (pendingId == null)
+            {
+                return Done(diagnostic.Stage == AyaIssuanceStage.EmployeeClaims ? AyaIssuanceReason.IncompleteEmployeeProfile : AyaIssuanceReason.PreSubmissionConflict,
+                    409, Conflict(new { error = "incomplete_employee_profile" }));
+            }
             catch (Exception)
             {
-                if (pendingId != null) _issuanceStates.Unknown(pendingId);
-                return StatusCode(502, new { error = "request_outcome_unknown", id = pendingId });
+                var stage = diagnostic.Stage;
+                var reason = stage switch {
+                    AyaIssuanceStage.TokenAcquisition => AyaIssuanceReason.TokenAcquisitionFailed,
+                    AyaIssuanceStage.ServiceRequestPreparation => AyaIssuanceReason.ServiceRequestPreparationFailed,
+                    AyaIssuanceStage.ServiceRequest => AyaIssuanceReason.ServiceTransportFailed,
+                    AyaIssuanceStage.ServiceResponse => AyaIssuanceReason.ServiceResponseFailed,
+                    AyaIssuanceStage.ResponseValidation => AyaIssuanceReason.ResponseValidationFailed,
+                    AyaIssuanceStage.StateBinding => AyaIssuanceReason.StateBindingFailed,
+                    AyaIssuanceStage.EmployeeClaims => AyaIssuanceReason.EmployeeClaimsFailed,
+                    _ => AyaIssuanceReason.UnexpectedFailure
+                };
+                if (pendingId != null) MarkUnknown();
+                diagnostic.Stage = stage;
+                return Done(reason, 502, StatusCode(502, new { error = "request_outcome_unknown", id = pendingId }));
             }
         }
 

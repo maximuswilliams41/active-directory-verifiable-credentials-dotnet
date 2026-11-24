@@ -3,6 +3,8 @@ using System.Linq;
 
 namespace AspNetCoreVerifiableCredentials
 {
+    public enum AyaRequestBeginResult { Started, InvalidArguments, CapacityReached, DuplicateId, AlreadyActive }
+
     // Tracks both request kinds; the historical class name is retained to avoid unrelated API churn.
     public sealed class AyaIssuanceStateStore
     {
@@ -14,17 +16,22 @@ namespace AspNetCoreVerifiableCredentials
         private static bool Terminal(string status) => status == "issuance_successful" || status == "issuance_error" ||
             status == "presentation_verified" || status == "presentation_error";
         public bool Begin(string id, string owner, string kind, string issuer)
+            => BeginWithResult(id, owner, kind, issuer) == AyaRequestBeginResult.Started;
+        // Preserve the same transaction and predicate order; expose only the fixed refusal reason.
+        public AyaRequestBeginResult BeginWithResult(string id, string owner, string kind, string issuer)
         {
             if (!Id(id) || string.IsNullOrWhiteSpace(owner) || (kind != "issuance" && kind != "presentation") ||
-                string.IsNullOrWhiteSpace(issuer)) return false;
+                string.IsNullOrWhiteSpace(issuer)) return AyaRequestBeginResult.InvalidArguments;
             return _storage.Commit(rows => {
                 var now = _time.GetUtcNow();
                 foreach (var key in rows.Where(p => p.Value.RetainUntil <= now).Select(p => p.Key).ToArray()) rows.Remove(key);
-                if (rows.Count >= 2000 || rows.ContainsKey(id) || rows.Values.Any(r => r.Owner == owner && r.Kind == kind &&
-                    r.AcceptUntil > now && !Terminal(r.Status))) return false;
+                if (rows.Count >= 2000) return AyaRequestBeginResult.CapacityReached;
+                if (rows.ContainsKey(id)) return AyaRequestBeginResult.DuplicateId;
+                if (rows.Values.Any(r => r.Owner == owner && r.Kind == kind &&
+                    r.AcceptUntil > now && !Terminal(r.Status))) return AyaRequestBeginResult.AlreadyActive;
                 rows.Add(id, new AyaRequestRecord { Id = id, Owner = owner, Kind = kind, Issuer = issuer,
                     Created = now, AcceptUntil = now.AddMinutes(10), RetainUntil = now.AddHours(24) });
-                return true;
+                return AyaRequestBeginResult.Started;
             });
         }
         public bool Bind(string id, string requestId, DateTimeOffset expires)

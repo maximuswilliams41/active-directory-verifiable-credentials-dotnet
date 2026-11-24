@@ -1,0 +1,99 @@
+# Issuance diagnostics for an owner-approved pilot
+
+`POST /api/issuer/issuance-request` emits application event **7200**, named
+`AyaIssuance`, in logger category `AspNetCoreVerifiableCredentials.IssuerController`.
+It generates a new random `IssuanceCorrelationId` for each controller invocation
+and returns it in **`X-Aya-Issuance-Correlation-ID`**. Incoming correlation headers
+are not used. The ID is independent of the persisted request ID, employee identity,
+Microsoft request ID and callback state. Response JSON and HTTP status behavior
+are unchanged; the response header is the only new client-visible diagnostic.
+
+The event has exactly these structured fields: `IssuanceCorrelationId`,
+`ReasonCode`, `Stage`, `HttpStatus`, `ServiceHttpStatus` (plus the logger's fixed
+message template). `Started` is Information level, with no HTTP statuses yet.
+The terminal event is Warning for unsuccessful responses and Information for 200.
+Reasons and stages are closed enums. No exception object/message, payload, header,
+credential, claim, PIN, QR, issuance URL, persisted ID or employee data is logged.
+
+## Interpretation
+
+| Reason | Meaning | Application HTTP |
+| --- | --- | --- |
+| `TokenUnavailable` | Application-token provider returned no token | 502 |
+| `TokenAcquisitionFailed` | Application-token provider threw | 502 |
+| `ServiceRequestPreparationFailed` | Local outbound-message preparation failed | 502 |
+| `ServiceTransportFailed` | Sending/buffering the service request failed or timed out | 502 |
+| `ServiceRejected` | Received status other than the required 201; numeric status recorded | 400 |
+| `ServiceResponseFailed` | Could not read/parse the 201 response | 502 |
+| `ResponseValidationFailed` | 201 response failed link/expiry validation or timestamp conversion | 502 |
+| `StateBindingFailed` | 201 response could not be bound to local state | 502 |
+| `RequestAlreadyActive` | Existing nonterminal issuance for the same owner is still active | 409 |
+| `StateCapacityReached`, `StateIdConflict`, `StateArgumentsInvalid` | Other state-creation refusal; existing `request_already_active` body retained | 409 |
+| `IncompleteEmployeeProfile` | Existing pre-submission profile/configuration conflict | 409 |
+| `PreSubmissionConflict` | Other pre-submission `InvalidOperationException` | 409 |
+| `EmployeeClaimsFailed` | Fresh employee-profile retrieval/processing failed | 502 |
+| `StorageUnavailable` | Storage read/commit failed; `Stage` identifies where | 503 |
+| `RequestCreated` | Response accepted and state bound; **not credential issuance completion** | 200 |
+
+Guard reasons are `IssuanceDisabled`, `ValidityUnconfigured`,
+`RequestNotConfigured` (503), `IdentityDenied` (401), and `EmployeeNotEligible`
+(403). `UnexpectedFailure` is the fixed fallback for an unclassified failure.
+`ServiceHttpStatus` is present only if `SendAsync` returned a response. A missing
+status does not prove Microsoft never received the request. In particular,
+default HTTP response buffering can fail before that response reaches the caller.
+
+If recording an uncertain outcome itself fails, the terminal event reports
+`StorageUnavailable` / `OutcomeRecording` / 503. It does not claim the uncertain
+state was persisted. The adapter, ETag handling, transaction ordering, retention,
+ownership, callbacks and duplicate protection are unchanged.
+
+## Correlate one future test
+
+These instructions do not authorize deployment, enabling issuance, or another
+issuance attempt. Use only after the owner separately approves that pilot test.
+
+1. Confirm the deployed revision contains this change. Keep both activation flags
+   disabled until the owner approves the test. Do not delete or reset existing
+   uncertain requests to obtain a fresh attempt.
+2. Open the existing Azure App Service Log stream and browser Developer Tools
+   Network panel. Use **Preserve log**. This PR does not change logging settings;
+   if the application category is filtered or the configured log provider does
+   not reach Log stream, stop and review observability separately with the owner.
+   Do not enable body/header/identity logging.
+3. During the separately approved synthetic test, submit once through the normal
+   portal. Select its `POST /api/issuer/issuance-request` Network entry. Read only
+   the response status and response header `X-Aya-Issuance-Correlation-ID`.
+   Do not replay the request or export a HAR, cookies, bodies, tokens, PIN or QR.
+4. Find that exact correlation ID in Log stream. Record the UTC time, fixed reason,
+   stage, application HTTP status and service HTTP status (if any). These values
+   are sufficient to identify the failing boundary without sharing employee data.
+5. Stop after an unsuccessful result. A subsequent 409 has its own correlation
+   ID and cannot explain the preceding failure. Do not retry automatically or
+   clear state. Existing owner-bound status polling remains the read-only option.
+
+A framework rejection before the action (for example antiforgery validation),
+proxy-generated response, or abrupt process termination may have no terminal
+event/header. `Started` without a terminal event is incomplete evidence, not
+success. The request ledger does not persist these diagnostic IDs, and log
+retention/delivery remains dependent on the host's existing logging provider.
+This change cannot recover a historical exception or diagnose Microsoft's full
+error details without further separately approved investigation.
+
+## Synthetic validation
+
+Run from `1-asp-net-core-api-idtokenhint` with the selected .NET 10 SDK:
+
+```sh
+dotnet restore ../tests/Aya.EmployeeId.Tests/Aya.EmployeeId.Tests.csproj
+dotnet build ../tests/Aya.EmployeeId.Tests/Aya.EmployeeId.Tests.csproj --configuration Release --no-restore
+dotnet test ../tests/Aya.EmployeeId.Tests/Aya.EmployeeId.Tests.csproj --configuration Release --no-build --no-restore
+node --test ../tests/Aya.EmployeeId.Ui.Tests/*.test.cjs
+```
+
+The diagnostic tests use synthetic identities, token-provider/HTTP mocks and local
+persistence. They assert response compatibility, retained uncertain state across
+host restart, duplicate suppression, callback-binding rejection, storage failures,
+closed structured fields, no logged exception object and exclusion of synthetic
+sensitive values. Existing Table SDK/ETag and authorization regressions remain in
+the complete suite. These tests validate application logging; they do not certify
+third-party middleware, platform logs or independently configured telemetry.
