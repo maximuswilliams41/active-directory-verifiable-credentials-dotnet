@@ -170,6 +170,8 @@ Only the confirmed `openid-vc://?` variant is now accepted, in both server and
 employee-page issuance validation. `openid://vc/?` and unrecognized formats remain
 rejected. Accepted links still require a single HTTPS `request_uri` at the approved
 Microsoft hostname, default port, and no destination credentials or fragment.
+The employee page rejects raw outer fragments and parses the actual URL query;
+empty destination fragment markers are also rejected.
 Classification of rejected prefixes does not parse the
 query, validate the destination, or imply that a link is safe to accept. Length
 and missing-value checks still precede prefix validation. If recording the

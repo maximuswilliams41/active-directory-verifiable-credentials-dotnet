@@ -115,30 +115,44 @@ test('issuance rejects every unapproved structural format without exposing a wal
 });
 
 for (const [name, prefix] of [['original', 'openid://vc?'], ['confirmed', 'openid-vc://?']]) {
-    test(`${name} issuance format reaches the employee page wallet link and QR renderer`, async () => {
-        const vm = require('node:vm'); const fs = require('node:fs');
-        const elements = new Map(), rendered = [], calls = [];
-        function element(id) {
-            if (!elements.has(id)) elements.set(id, { dataset: { ready: 'true' }, listeners: {},
-                addEventListener(event, action) { this.listeners[event] = action; },
-                replaceChildren() {}, removeAttribute(name) { delete this[name]; } });
-            return elements.get(id);
-        }
-        const body = { ...request, expiry: Math.floor(Date.now() / 1000) + 60,
-            url: prefix + 'request_uri=https://verifiedid.did.msidentity.com/synthetic' };
-        const responses = [profile, body];
-        const context = { URL, URLSearchParams, Date, setTimeout: () => 1, clearTimeout: () => {},
-            document: { getElementById: element, querySelector: () => ({ value: 'synthetic-antiforgery' }) },
-            window: { fetch: async (url, options) => { calls.push({ url, options }); return { ok: true, json: async () => responses.shift() }; } },
-            QRCode: class { constructor(target, options) { rendered.push(options.text); } }
-        };
-        vm.runInNewContext(fs.readFileSync(require.resolve('../../1-asp-net-core-api-idtokenhint/wwwroot/aya-employee-id.js'), 'utf8'), context);
-        await element('check-eligibility').listeners.click();
-        await element('issue-credential').listeners.click();
-        assert.equal(element('aya-wallet').hidden, false);
-        assert.equal(element('authenticator-link').href, body.url); assert.deepEqual(rendered, [body.url]);
-        assert.equal(calls[1].url, '/api/issuer/issuance-request'); assert.equal(calls[1].options.method, 'POST');
-        await element('stop-waiting').listeners.click();
-        assert.equal(element('aya-wallet').hidden, true); assert.equal(element('authenticator-link').href, undefined);
-    });
+    for (const scenario of ['valid', 'encoded_path_marker', 'outer_empty_fragment', 'outer_fragment', 'query_in_outer_fragment', 'destination_empty_fragment', 'destination_fragment']) {
+        test(`${name} employee entry point handles ${scenario} without confusing query and fragment`, async () => {
+            const vm = require('node:vm'); const fs = require('node:fs');
+            const elements = new Map(), rendered = [], calls = [];
+            function element(id) {
+                if (!elements.has(id)) elements.set(id, { dataset: { ready: 'true' }, listeners: {},
+                    addEventListener(event, action) { this.listeners[event] = action; },
+                    replaceChildren() {}, removeAttribute(name) { delete this[name]; } });
+                return elements.get(id);
+            }
+            const target = 'https://verifiedid.did.msidentity.com/synthetic';
+            const suffix = {
+                valid: 'request_uri=' + target,
+                encoded_path_marker: 'request_uri=' + encodeURIComponent(target + '%23path'),
+                outer_empty_fragment: 'request_uri=' + target + '#',
+                outer_fragment: 'request_uri=' + target + '#synthetic',
+                query_in_outer_fragment: '#synthetic&request_uri=' + target,
+                destination_empty_fragment: 'request_uri=' + encodeURIComponent(target + '#'),
+                destination_fragment: 'request_uri=' + encodeURIComponent(target + '#synthetic')
+            }[scenario];
+            const accepted = scenario === 'valid' || scenario === 'encoded_path_marker';
+            const body = { ...request, expiry: Math.floor(Date.now() / 1000) + 60, url: prefix + suffix };
+            const responses = [profile, body];
+            const context = { URL, URLSearchParams, Date, setTimeout: () => 1, clearTimeout: () => {},
+                document: { getElementById: element, querySelector: () => ({ value: 'synthetic-antiforgery' }) },
+                window: { fetch: async (url, options) => { calls.push({ url, options }); return { ok: true, json: async () => responses.shift() }; } },
+                QRCode: class { constructor(target, options) { rendered.push(options.text); } }
+            };
+            vm.runInNewContext(fs.readFileSync(require.resolve('../../1-asp-net-core-api-idtokenhint/wwwroot/aya-employee-id.js'), 'utf8'), context);
+            await element('check-eligibility').listeners.click();
+            await element('issue-credential').listeners.click();
+            assert.equal(element('aya-wallet').hidden, !accepted);
+            assert.equal(element('authenticator-link').href, accepted ? body.url : undefined);
+            assert.deepEqual(rendered, accepted ? [body.url] : []);
+            if (!accepted) assert.match(element('aya-status').textContent, /could not be prepared/);
+            assert.equal(calls[1].url, '/api/issuer/issuance-request'); assert.equal(calls[1].options.method, 'POST');
+            await element('stop-waiting').listeners.click();
+            assert.equal(element('aya-wallet').hidden, true); assert.equal(element('authenticator-link').href, undefined);
+        });
+    }
 }

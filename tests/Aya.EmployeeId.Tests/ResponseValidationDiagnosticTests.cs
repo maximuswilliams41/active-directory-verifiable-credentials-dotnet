@@ -24,6 +24,7 @@ public sealed class ResponseValidationDiagnosticTests
         yield return [Prefix + "https://verifiedid.did.msidentity.com:8443/" + Private, AyaResponseValidationReason.RequestUriPortRejected];
         yield return [Prefix + "https://synthetic@verifiedid.did.msidentity.com/" + Private, AyaResponseValidationReason.RequestUriUserInfoRejected];
         yield return [Prefix + Uri.EscapeDataString(Target + "#synthetic"), AyaResponseValidationReason.RequestUriFragmentRejected];
+        yield return [Prefix + Uri.EscapeDataString(Target + "#"), AyaResponseValidationReason.RequestUriFragmentRejected];
         yield return [Prefix + Target, AyaResponseValidationReason.None];
         yield return [Prefix + Uri.EscapeDataString(Target), AyaResponseValidationReason.None];
         yield return [Prefix + "https://verifiedid.did.msidentity.com:443/" + Private + "&other=synthetic", AyaResponseValidationReason.None];
