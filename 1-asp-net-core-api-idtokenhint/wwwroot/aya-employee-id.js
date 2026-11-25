@@ -28,10 +28,14 @@ class AyaEmployeeFlow {
             if (!response.ok) throw new Error();
             const request = await response.json();
             if (generation !== this.generation) return;
-            const link = new URL(request.url);
-            const target = new URL(link.searchParams.get("request_uri"));
-            if (link.protocol !== "openid:" || link.hostname !== "vc" || target.protocol !== "https:" ||
-                target.hostname !== "verifiedid.did.msidentity.com" || target.username || target.password ||
+            if (typeof request.url !== "string" || request.url.length > 8192) throw new Error();
+            const prefix = ["openid://vc?", "openid-vc://?"].find(value => request.url.startsWith(value));
+            if (!prefix || request.url.includes("#")) throw new Error();
+            const targets = new URL(request.url).searchParams.getAll("request_uri");
+            if (targets.length !== 1) throw new Error();
+            const target = new URL(targets[0]);
+            if (target.protocol !== "https:" || target.hostname !== "verifiedid.did.msidentity.com" ||
+                target.port || target.username || target.password || target.href.includes("#") ||
                 !/^[0-9a-f-]{36}$/i.test(request.id) || !Number.isFinite(request.expiry) || request.expiry * 1000 <= this.now() ||
                 (request.statusExpiry !== undefined && (!Number.isFinite(request.statusExpiry) || request.statusExpiry < request.expiry || request.statusExpiry > request.expiry + 120))) throw new Error();
             this.update({ stage: "waiting", request, message: "Open Authenticator or scan the code. Review and accept your ID." });

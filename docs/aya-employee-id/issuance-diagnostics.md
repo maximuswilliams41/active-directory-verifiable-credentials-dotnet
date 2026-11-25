@@ -150,8 +150,8 @@ ordering, retention and duplicate controls remain local policies.
 that a response was received and parsed as an object, then rejected before binding.
 It does not establish which URL/expiry predicate failed, nor demonstrate callback
 reachability or successful credential issuance. Request-ID binding and callback
-correlation cannot be the direct cause of that specific event. No compatibility
-relaxation is included in this diagnostic-only change.
+correlation cannot be the direct cause of that specific event. The confirmed issuance prefix `openid-vc://?` is now accepted alongside
+`openid://vc?`; the destination, expiration and binding checks remain in force.
 
 ### Rejected issuance prefix category
 
@@ -163,15 +163,22 @@ Exact, case-sensitive ordinal matching includes the query delimiter:
 | --- | --- |
 | `NotApplicable` | Started event or any path without an issuance prefix rejection |
 | `OpenIdVcSlashQuery` | Starts exactly with `openid://vc/?` |
-| `OpenIdVcSchemeQuery` | Starts exactly with `openid-vc://?` |
+| `OpenIdVcSchemeQuery` | Historical diagnostic value for `openid-vc://?`; now accepted at the prefix check |
 | `Other` | Any other rejected prefix; no input characters are recorded |
 
-The two recognized variants remain rejected. Classification does not parse the
+Only the confirmed `openid-vc://?` variant is now accepted, in both server and
+employee-page issuance validation. `openid://vc/?` and unrecognized formats remain
+rejected. Accepted links still require a single HTTPS `request_uri` at the approved
+Microsoft hostname, default port, and no destination credentials or fragment.
+The employee page rejects raw outer fragments and parses the actual URL query;
+empty destination fragment markers are also rejected.
+Classification of rejected prefixes does not parse the
 query, validate the destination, or imply that a link is safe to accept. Length
 and missing-value checks still precede prefix validation. If recording the
 uncertain outcome fails, the category retains the preceding prefix-rejection
 detail, just like `ValidationReason`. Response bodies, retention, duplicate
-protection, presentation validation and all URL acceptance rules are unchanged.
+protection, presentation validation and all other server URL acceptance rules are unchanged.
+Accepted prefixes use `NotApplicable`, including when a later destination check fails.
 
 Owner gate: review and approve merge/deployment separately; keep both activation
 flags disabled until a separately approved synthetic test. Confirm the deployed

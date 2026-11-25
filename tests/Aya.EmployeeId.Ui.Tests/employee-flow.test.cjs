@@ -73,3 +73,86 @@ test('issuance final deadline remains unconfirmed and does not reissue', async (
     await f.flow.profile(); await f.flow.issue(); f.advance(180000); await f.poll();
     assert.equal(f.flow.state.stage, 'expired'); assert.match(f.flow.state.message, /unconfirmed/); assert.equal(f.calls.length, 2);
 });
+
+for (const [name, prefix] of [['original', 'openid://vc?'], ['confirmed', 'openid-vc://?']]) {
+    test(`${name} issuance format reaches waiting and requires confirmed callback status`, async () => {
+        const f = fixture(); const body = { ...request, url: prefix + 'request_uri=https://verifiedid.did.msidentity.com:443/synthetic' };
+        f.responses.push({ body: profile }, { body }); await f.flow.profile(); await f.flow.issue();
+        assert.equal(f.flow.state.stage, 'waiting'); assert.equal(f.flow.state.request.url, body.url);
+        assert.equal(f.calls[1].url, '/api/issuer/issuance-request');
+        assert.equal(f.calls[1].options.headers.RequestVerificationToken, 'synthetic-antiforgery');
+        f.responses.push({ body: { status: 'request_retrieved' } }); await f.poll(); assert.equal(f.flow.state.stage, 'waiting');
+        f.responses.push({ body: { status: 'issuance_successful' } }); await f.poll(); assert.equal(f.flow.state.stage, 'success');
+    });
+    test(`${name} issuance format rejects malformed or unsafe destinations`, async () => {
+        for (const query of [
+            '', 'other=synthetic', 'request_uri=', 'request_uri=synthetic',
+            'request_uri=http://verifiedid.did.msidentity.com/synthetic',
+            'request_uri=https://example.invalid/synthetic',
+            'request_uri=https://verifiedid.did.msidentity.com:8443/synthetic',
+            'request_uri=https://synthetic:synthetic@verifiedid.did.msidentity.com/synthetic',
+            'request_uri=' + encodeURIComponent('https://verifiedid.did.msidentity.com/synthetic#fragment'),
+            'request_uri=https://verifiedid.did.msidentity.com/synthetic&request_uri=https://verifiedid.did.msidentity.com/synthetic',
+            'request_uri=' + 'x'.repeat(8193)
+        ]) {
+            const f = fixture(); f.responses.push({ body: profile }, { body: { ...request, url: prefix + query } });
+            await f.flow.profile(); await f.flow.issue();
+            assert.equal(f.flow.state.stage, 'error'); assert.equal(f.flow.state.request, null); assert.equal(f.calls.length, 2);
+        }
+    });
+    test(`${name} issuance format preserves expiry and request identity guards`, async () => {
+        for (const fields of [{ expiry: -1 }, { expiry: '60' }, { id: 'synthetic-invalid' }, { statusExpiry: 181 }, { statusExpiry: 59 }]) {
+            const f = fixture(); f.responses.push({ body: profile }, { body: { ...request, url: prefix + 'request_uri=https://verifiedid.did.msidentity.com/synthetic', ...fields } });
+            await f.flow.profile(); await f.flow.issue(); assert.equal(f.flow.state.stage, 'error'); assert.equal(f.flow.state.request, null);
+        }
+    });
+}
+test('issuance rejects every unapproved structural format without exposing a wallet link', async () => {
+    for (const prefix of ['openid://vc/?', 'OPENID-VC://?', ' openid-vc://?', 'openid-vc:///?', 'openid-vc://vc?', 'synthetic-private://?', 'openid://synthetic@vc?', 'openid://vc:8443?']) {
+        const f = fixture(); f.responses.push({ body: profile }, { body: { ...request, url: prefix + 'request_uri=https://verifiedid.did.msidentity.com/synthetic' } });
+        await f.flow.profile(); await f.flow.issue(); assert.equal(f.flow.state.stage, 'error'); assert.equal(f.flow.state.request, null);
+    }
+});
+
+for (const [name, prefix] of [['original', 'openid://vc?'], ['confirmed', 'openid-vc://?']]) {
+    for (const scenario of ['valid', 'encoded_path_marker', 'outer_empty_fragment', 'outer_fragment', 'query_in_outer_fragment', 'destination_empty_fragment', 'destination_fragment']) {
+        test(`${name} employee entry point handles ${scenario} without confusing query and fragment`, async () => {
+            const vm = require('node:vm'); const fs = require('node:fs');
+            const elements = new Map(), rendered = [], calls = [];
+            function element(id) {
+                if (!elements.has(id)) elements.set(id, { dataset: { ready: 'true' }, listeners: {},
+                    addEventListener(event, action) { this.listeners[event] = action; },
+                    replaceChildren() {}, removeAttribute(name) { delete this[name]; } });
+                return elements.get(id);
+            }
+            const target = 'https://verifiedid.did.msidentity.com/synthetic';
+            const suffix = {
+                valid: 'request_uri=' + target,
+                encoded_path_marker: 'request_uri=' + encodeURIComponent(target + '%23path'),
+                outer_empty_fragment: 'request_uri=' + target + '#',
+                outer_fragment: 'request_uri=' + target + '#synthetic',
+                query_in_outer_fragment: '#synthetic&request_uri=' + target,
+                destination_empty_fragment: 'request_uri=' + encodeURIComponent(target + '#'),
+                destination_fragment: 'request_uri=' + encodeURIComponent(target + '#synthetic')
+            }[scenario];
+            const accepted = scenario === 'valid' || scenario === 'encoded_path_marker';
+            const body = { ...request, expiry: Math.floor(Date.now() / 1000) + 60, url: prefix + suffix };
+            const responses = [profile, body];
+            const context = { URL, URLSearchParams, Date, setTimeout: () => 1, clearTimeout: () => {},
+                document: { getElementById: element, querySelector: () => ({ value: 'synthetic-antiforgery' }) },
+                window: { fetch: async (url, options) => { calls.push({ url, options }); return { ok: true, json: async () => responses.shift() }; } },
+                QRCode: class { constructor(target, options) { rendered.push(options.text); } }
+            };
+            vm.runInNewContext(fs.readFileSync(require.resolve('../../1-asp-net-core-api-idtokenhint/wwwroot/aya-employee-id.js'), 'utf8'), context);
+            await element('check-eligibility').listeners.click();
+            await element('issue-credential').listeners.click();
+            assert.equal(element('aya-wallet').hidden, !accepted);
+            assert.equal(element('authenticator-link').href, accepted ? body.url : undefined);
+            assert.deepEqual(rendered, accepted ? [body.url] : []);
+            if (!accepted) assert.match(element('aya-status').textContent, /could not be prepared/);
+            assert.equal(calls[1].url, '/api/issuer/issuance-request'); assert.equal(calls[1].options.method, 'POST');
+            await element('stop-waiting').listeners.click();
+            assert.equal(element('aya-wallet').hidden, true); assert.equal(element('authenticator-link').href, undefined);
+        });
+    }
+}

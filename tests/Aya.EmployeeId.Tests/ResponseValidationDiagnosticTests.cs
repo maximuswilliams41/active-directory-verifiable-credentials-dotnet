@@ -15,7 +15,7 @@ public sealed class ResponseValidationDiagnosticTests
     {
         yield return [null, AyaResponseValidationReason.UrlMissing];
         yield return [new string('x', 8193), AyaResponseValidationReason.UrlTooLong];
-        yield return ["openid-vc://?request_uri=" + Target, AyaResponseValidationReason.UrlPrefixRejected];
+        yield return ["openid-vc://?request_uri=" + Target, AyaResponseValidationReason.None];
         yield return ["openid://vc?other=" + Private, AyaResponseValidationReason.RequestUriMissing];
         yield return [Prefix + Target + "&request_uri=" + Target, AyaResponseValidationReason.RequestUriAmbiguous];
         yield return [Prefix + Private, AyaResponseValidationReason.RequestUriInvalid];
@@ -24,12 +24,22 @@ public sealed class ResponseValidationDiagnosticTests
         yield return [Prefix + "https://verifiedid.did.msidentity.com:8443/" + Private, AyaResponseValidationReason.RequestUriPortRejected];
         yield return [Prefix + "https://synthetic@verifiedid.did.msidentity.com/" + Private, AyaResponseValidationReason.RequestUriUserInfoRejected];
         yield return [Prefix + Uri.EscapeDataString(Target + "#synthetic"), AyaResponseValidationReason.RequestUriFragmentRejected];
+        yield return [Prefix + Uri.EscapeDataString(Target + "#"), AyaResponseValidationReason.RequestUriFragmentRejected];
         yield return [Prefix + Target, AyaResponseValidationReason.None];
         yield return [Prefix + Uri.EscapeDataString(Target), AyaResponseValidationReason.None];
         yield return [Prefix + "https://verifiedid.did.msidentity.com:443/" + Private + "&other=synthetic", AyaResponseValidationReason.None];
     }
 
-    // Frozen pre-change predicates: ensure diagnostic attribution cannot broaden/narrow acceptance.
+    public static IEnumerable<object[]> BothFormats()
+    {
+        foreach (var row in Links()) {
+            yield return row;
+            if (row[0] is string url && url.StartsWith("openid://vc?", StringComparison.Ordinal) && url != Prefix + Target)
+                yield return [url.Replace("openid://vc?", "openid-vc://?"), row[1]];
+        }
+    }
+
+    // Frozen original predicates: normalize only the approved issuance prefix for comparison.
     private static bool PreviousValid(string url, string kind)
     {
         var prefix = kind == "issuance" ? "openid://vc?" : "openid-vc://?";
@@ -40,22 +50,20 @@ public sealed class ResponseValidationDiagnosticTests
             target.Host == "verifiedid.did.msidentity.com" && target.IsDefaultPort && target.UserInfo == "" && target.Fragment == "";
     }
     [Theory]
-    [MemberData(nameof(Links))]
-    public async Task Link_failure_is_attributed_without_changing_validation_or_logging_values(string url, AyaResponseValidationReason expected)
+    [MemberData(nameof(BothFormats))]
+    public async Task Both_issuance_formats_preserve_destination_validation_and_diagnostic_privacy(string url, AyaResponseValidationReason expected)
     {
         foreach (var kind in new[] { "issuance", "presentation" }) {
-            Assert.Equal(PreviousValid(url, kind), AyaRequestLinks.Valid(url, kind));
-            var presentationUrl = url?.Replace("openid://vc?", "openid-vc://?");
-            Assert.Equal(PreviousValid(presentationUrl, kind), AyaRequestLinks.Valid(presentationUrl, kind));
+            var previousUrl = kind == "issuance" && url?.StartsWith("openid-vc://?", StringComparison.Ordinal) == true
+                ? "openid://vc?" + url.Substring("openid-vc://?".Length) : url;
+            Assert.Equal(PreviousValid(previousUrl, kind), AyaRequestLinks.Valid(url, kind));
         }
         Assert.Equal(expected == AyaResponseValidationReason.None, AyaRequestLinks.Valid(url, "issuance", out var reason));
         Assert.Equal(expected, reason);
         var body = Body(); body["url"] = url;
         await Check(body, expected, expected == AyaResponseValidationReason.None ? 200 : 502,
             expected == AyaResponseValidationReason.None ? AyaIssuanceReason.RequestCreated : AyaIssuanceReason.ResponseValidationFailed,
-            expected == AyaResponseValidationReason.None ? AyaIssuanceStage.StateBinding : AyaIssuanceStage.ResponseValidation,
-            prefixCategory: expected == AyaResponseValidationReason.UrlPrefixRejected
-                ? AyaRejectedPrefixCategory.OpenIdVcSchemeQuery : AyaRejectedPrefixCategory.NotApplicable);
+            expected == AyaResponseValidationReason.None ? AyaIssuanceStage.StateBinding : AyaIssuanceStage.ResponseValidation);
     }
 
     [Theory]
@@ -68,10 +76,13 @@ public sealed class ResponseValidationDiagnosticTests
     [InlineData("private_suffix_before_query", AyaRejectedPrefixCategory.Other)]
     [InlineData("scheme_private_suffix_before_query", AyaRejectedPrefixCategory.Other)]
     [InlineData("uppercase", AyaRejectedPrefixCategory.Other)]
+    [InlineData("uppercase_scheme", AyaRejectedPrefixCategory.Other)]
+    [InlineData("extra_slash_scheme", AyaRejectedPrefixCategory.Other)]
+    [InlineData("authority_scheme", AyaRejectedPrefixCategory.Other)]
     [InlineData("leading_space", AyaRejectedPrefixCategory.Other)]
     [InlineData("missing_delimiter", AyaRejectedPrefixCategory.Other)]
     [InlineData("extra_slash", AyaRejectedPrefixCategory.Other)]
-    public async Task Rejected_prefix_category_is_fixed_and_does_not_change_response_or_retention(string scenario, AyaRejectedPrefixCategory category)
+    public async Task Only_confirmed_prefix_changes_acceptance_and_other_categories_remain_rejected(string scenario, AyaRejectedPrefixCategory category)
     {
         var url = scenario switch {
             "slash_query" => "openid://vc/?request_uri=" + Target + "&private=" + Private,
@@ -83,12 +94,23 @@ public sealed class ResponseValidationDiagnosticTests
             "private_suffix_before_query" => "openid://vc/" + Private + "?" + Private,
             "scheme_private_suffix_before_query" => "openid-vc://" + Private + "?" + Private,
             "uppercase" => "OPENID://vc/?" + Private,
+            "uppercase_scheme" => "OPENID-VC://?" + Private,
+            "extra_slash_scheme" => "openid-vc:///?" + Private,
+            "authority_scheme" => "openid-vc://vc?" + Private,
             "leading_space" => " openid://vc/?" + Private,
             "missing_delimiter" => "openid://vc/",
             "extra_slash" => "openid://vc//?" + Private,
             _ => throw new InvalidOperationException()
         };
         Assert.False(PreviousValid(url, "issuance"));
+        if (scenario == "scheme_query" || scenario == "scheme_empty_query") {
+            var accepted = scenario == "scheme_query";
+            var revised = Body(); revised["url"] = url;
+            await Check(revised, accepted ? AyaResponseValidationReason.None : AyaResponseValidationReason.RequestUriMissing,
+                accepted ? 200 : 502, accepted ? AyaIssuanceReason.RequestCreated : AyaIssuanceReason.ResponseValidationFailed,
+                accepted ? AyaIssuanceStage.StateBinding : AyaIssuanceStage.ResponseValidation);
+            return;
+        }
         Assert.False(AyaRequestLinks.Valid(url, "issuance", out var reason));
         Assert.Equal(AyaResponseValidationReason.UrlPrefixRejected, reason);
         var body = Body(); body["url"] = url;
@@ -132,12 +154,16 @@ public sealed class ResponseValidationDiagnosticTests
     }
 
     [Theory]
-    [InlineData("missing_id")]
-    [InlineData("expired")]
-    [InlineData("future")]
-    public async Task Binding_failures_are_not_misclassified_as_url_or_expiry_parsing_failures(string scenario)
+    [InlineData("missing_id", false)]
+    [InlineData("expired", false)]
+    [InlineData("future", false)]
+    [InlineData("missing_id", true)]
+    [InlineData("expired", true)]
+    [InlineData("future", true)]
+    public async Task Binding_failures_are_not_misclassified_as_url_or_expiry_parsing_failures(string scenario, bool confirmedPrefix)
     {
         var body = Body();
+        if (confirmedPrefix) body["url"] = "openid-vc://?request_uri=" + Target;
         if (scenario == "missing_id") body.Remove("requestId");
         if (scenario == "expired") body["expiry"] = DateTimeOffset.UtcNow.AddMinutes(-1).ToUnixTimeSeconds();
         if (scenario == "future") body["expiry"] = DateTimeOffset.UtcNow.AddMinutes(15).ToUnixTimeSeconds();
@@ -176,6 +202,7 @@ public sealed class ResponseValidationDiagnosticTests
             if (serviceBody["requestId"] != null) Assert.DoesNotContain(serviceBody.Value<string>("requestId"), line);
             if (result["pin"] != null) Assert.DoesNotContain(result.Value<string>("pin"), line);
         }
+        if (status == 200) Assert.Equal(serviceBody.Value<string>("url"), result.Value<string>("url"));
         var id = result.Value<string>("id"); Assert.NotNull(id);
         var state = JObject.Parse(await client.GetStringAsync("/api/request-status?id=" + id)).Value<string>("status");
         Assert.Equal(status == 200 ? "request_created" : "outcome_unknown", state);
