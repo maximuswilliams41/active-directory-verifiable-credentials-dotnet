@@ -1,6 +1,6 @@
 /* Local UI controller: network calls are same-origin application endpoints only. */
 class AyaEmployeeFlow {
-    constructor({ fetch, now = () => Date.now(), schedule = setTimeout, cancel = clearTimeout, changed = () => {}, token = "", enabled = false }) {
+    constructor({ fetch, now = () => Date.now(), schedule = (callback, delay) => setTimeout(callback, delay), cancel = timer => clearTimeout(timer), changed = () => {}, token = "", enabled = false }) {
         Object.assign(this, { fetch, now, schedule, cancel, changed, token, enabled });
         this.generation = 0; this.state = { stage: enabled ? "idle" : "disabled", message: enabled ? "Check your details to begin." : "Issuance is currently disabled. No credential will be issued." };
     }
