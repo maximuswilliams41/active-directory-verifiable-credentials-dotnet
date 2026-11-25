@@ -64,12 +64,23 @@ public sealed class IssuanceTests
         return JObject.Parse(await response.Content.ReadAsStringAsync()).Value<string>("id");
     }
 
-    [Fact]
-    public async Task Authorized_owner_can_observe_success_and_duplicate_delivery()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Authorized_owner_can_observe_success_and_duplicate_delivery(bool confirmedPrefix)
     {
         using var app = new TestApp(); using var client = app.CreateClient();
+        if (confirmedPrefix) app.Outbound.IssuanceResponse = () => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Created) {
+            Content = new StringContent(JsonConvert.SerializeObject(new { requestId = "synthetic-request",
+                expiry = DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeSeconds(),
+                url = "openid-vc://?request_uri=https://verifiedid.did.msidentity.com/synthetic" }))
+        });
         var state = await Create(client);
         Assert.Equal("request_created", JObject.Parse(await client.GetStringAsync("/api/request-status?id=" + state))["status"]);
+        Identity(client, Other);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/request-status?id=" + state)).StatusCode);
+        Identity(client);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Callback(client, state, "issuance_successful", key: null)).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await Callback(client, state, "request_retrieved")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await Callback(client, state, "issuance_successful")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await Callback(client, state, "issuance_successful")).StatusCode);

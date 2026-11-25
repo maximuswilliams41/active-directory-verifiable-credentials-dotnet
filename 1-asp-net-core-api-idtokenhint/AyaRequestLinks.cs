@@ -29,7 +29,8 @@ namespace AspNetCoreVerifiableCredentials
 
         public static bool Valid(string url, string kind) => Valid(url, kind, out _);
 
-        // Same predicates and short-circuit order as the original validator. The reason is
+        // Only issuance accepts the additional confirmed prefix. Destination checks retain their order.
+        // The reason is
         // a closed diagnostic enum, never a parsed value or exception message.
         public static bool Valid(string url, string kind, out AyaResponseValidationReason reason)
         {
@@ -39,6 +40,7 @@ namespace AspNetCoreVerifiableCredentials
             reason = AyaResponseValidationReason.UrlTooLong;
             if (url.Length > 8192) return false;
             reason = AyaResponseValidationReason.UrlPrefixRejected;
+            if (kind == "issuance" && url.StartsWith("openid-vc://?", StringComparison.Ordinal)) prefix = "openid-vc://?";
             if (!url.StartsWith(prefix, StringComparison.Ordinal)) return false;
             reason = AyaResponseValidationReason.UrlQueryInvalid;
             var query = QueryHelpers.ParseQuery(url.Substring(prefix.Length));
