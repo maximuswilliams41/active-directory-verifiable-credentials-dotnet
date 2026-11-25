@@ -36,11 +36,14 @@ public sealed class IssuanceDiagnosticTests
         foreach (var entry in events) {
             Assert.Null(entry.Error);
             Assert.Equal(id, entry.Fields["IssuanceCorrelationId"]);
-            Assert.Equal(new[] { "HttpStatus", "IssuanceCorrelationId", "ReasonCode", "ServiceHttpStatus", "Stage", "ValidationReason", "{OriginalFormat}" },
+            Assert.Equal(new[] { "HttpStatus", "IssuanceCorrelationId", "PrefixCategory", "ReasonCode", "ServiceHttpStatus", "Stage", "ValidationReason", "{OriginalFormat}" },
                 entry.Fields.Keys.Order(StringComparer.Ordinal).ToArray());
             Assert.IsType<AyaIssuanceReason>(entry.Fields["ReasonCode"]);
             Assert.IsType<AyaIssuanceStage>(entry.Fields["Stage"]);
             Assert.IsType<AyaResponseValidationReason>(entry.Fields["ValidationReason"]);
+            Assert.IsType<AyaRejectedPrefixCategory>(entry.Fields["PrefixCategory"]);
+            if (!Equals(entry.Fields["ValidationReason"], AyaResponseValidationReason.UrlPrefixRejected))
+                Assert.Equal(AyaRejectedPrefixCategory.NotApplicable, entry.Fields["PrefixCategory"]);
         }
         var forbidden = new List<string> { Canary, IssuanceTests.Owner, IssuanceTests.Tenant, IssuanceTests.EmployeeKey,
             IssuanceTests.CallbackKey, "Synthetic Fixture", "SYNTHETIC-001", "Aya Living Inc.", "synthetic-profile-token",
@@ -52,7 +55,7 @@ public sealed class IssuanceDiagnosticTests
                 forbidden.Add(pin.Value<string>("value")); forbidden.Add(pin.Value<string>("salt"));
             }
         }
-        foreach (var entry in app.Logs.Entries)
+        foreach (var entry in app.Logs.Entries.Concat(app.Logs.Events.SelectMany(e => e.Fields.Values).Select(v => v?.ToString() ?? "")))
             foreach (var value in forbidden.Where(v => !string.IsNullOrEmpty(v))) Assert.DoesNotContain(value, entry);
         return id;
     }

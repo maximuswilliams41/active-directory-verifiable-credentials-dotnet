@@ -53,7 +53,55 @@ public sealed class ResponseValidationDiagnosticTests
         var body = Body(); body["url"] = url;
         await Check(body, expected, expected == AyaResponseValidationReason.None ? 200 : 502,
             expected == AyaResponseValidationReason.None ? AyaIssuanceReason.RequestCreated : AyaIssuanceReason.ResponseValidationFailed,
-            expected == AyaResponseValidationReason.None ? AyaIssuanceStage.StateBinding : AyaIssuanceStage.ResponseValidation);
+            expected == AyaResponseValidationReason.None ? AyaIssuanceStage.StateBinding : AyaIssuanceStage.ResponseValidation,
+            prefixCategory: expected == AyaResponseValidationReason.UrlPrefixRejected
+                ? AyaRejectedPrefixCategory.OpenIdVcSchemeQuery : AyaRejectedPrefixCategory.NotApplicable);
+    }
+
+    [Theory]
+    [InlineData("slash_query", AyaRejectedPrefixCategory.OpenIdVcSlashQuery)]
+    [InlineData("scheme_query", AyaRejectedPrefixCategory.OpenIdVcSchemeQuery)]
+    [InlineData("slash_empty_query", AyaRejectedPrefixCategory.OpenIdVcSlashQuery)]
+    [InlineData("scheme_empty_query", AyaRejectedPrefixCategory.OpenIdVcSchemeQuery)]
+    [InlineData("unknown_private_prefix", AyaRejectedPrefixCategory.Other)]
+    [InlineData("embedded_known_prefix", AyaRejectedPrefixCategory.Other)]
+    [InlineData("private_suffix_before_query", AyaRejectedPrefixCategory.Other)]
+    [InlineData("scheme_private_suffix_before_query", AyaRejectedPrefixCategory.Other)]
+    [InlineData("uppercase", AyaRejectedPrefixCategory.Other)]
+    [InlineData("leading_space", AyaRejectedPrefixCategory.Other)]
+    [InlineData("missing_delimiter", AyaRejectedPrefixCategory.Other)]
+    [InlineData("extra_slash", AyaRejectedPrefixCategory.Other)]
+    public async Task Rejected_prefix_category_is_fixed_and_does_not_change_response_or_retention(string scenario, AyaRejectedPrefixCategory category)
+    {
+        var url = scenario switch {
+            "slash_query" => "openid://vc/?request_uri=" + Target + "&private=" + Private,
+            "scheme_query" => "openid-vc://?request_uri=" + Target + "&private=" + Private,
+            "slash_empty_query" => "openid://vc/?",
+            "scheme_empty_query" => "openid-vc://?",
+            "unknown_private_prefix" => Private + "://?" + Private,
+            "embedded_known_prefix" => Private + "openid://vc/?" + Private,
+            "private_suffix_before_query" => "openid://vc/" + Private + "?" + Private,
+            "scheme_private_suffix_before_query" => "openid-vc://" + Private + "?" + Private,
+            "uppercase" => "OPENID://vc/?" + Private,
+            "leading_space" => " openid://vc/?" + Private,
+            "missing_delimiter" => "openid://vc/",
+            "extra_slash" => "openid://vc//?" + Private,
+            _ => throw new InvalidOperationException()
+        };
+        Assert.False(PreviousValid(url, "issuance"));
+        Assert.False(AyaRequestLinks.Valid(url, "issuance", out var reason));
+        Assert.Equal(AyaResponseValidationReason.UrlPrefixRejected, reason);
+        var body = Body(); body["url"] = url;
+        await Check(body, reason, 502, AyaIssuanceReason.ResponseValidationFailed,
+            AyaIssuanceStage.ResponseValidation, prefixCategory: category);
+    }
+
+    [Fact]
+    public async Task Length_rejection_before_prefix_check_has_no_prefix_category()
+    {
+        var body = Body(); body["url"] = "openid://vc/?" + new string('x', 8193);
+        await Check(body, AyaResponseValidationReason.UrlTooLong, 502,
+            AyaIssuanceReason.ResponseValidationFailed, AyaIssuanceStage.ResponseValidation);
     }
 
     private static JObject Body() => new() {
@@ -106,7 +154,8 @@ public sealed class ResponseValidationDiagnosticTests
     }
 
     private static async Task Check(JObject serviceBody, AyaResponseValidationReason validation, int status,
-        AyaIssuanceReason reason, AyaIssuanceStage stage, string error = "invalid_service_response")
+        AyaIssuanceReason reason, AyaIssuanceStage stage, string error = "invalid_service_response",
+        AyaRejectedPrefixCategory prefixCategory = AyaRejectedPrefixCategory.NotApplicable)
     {
         using var app = new IssuanceTests.TestApp();
         app.Outbound.IssuanceResponse = () => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Created) {
@@ -119,7 +168,9 @@ public sealed class ResponseValidationDiagnosticTests
         var entries = app.Logs.Events.Where(e => e.EventId == 7200).ToArray();
         Assert.Equal(AyaResponseValidationReason.None, entries[0].Fields["ValidationReason"]);
         Assert.Equal(validation, entries[1].Fields["ValidationReason"]);
-        foreach (var line in app.Logs.Entries) {
+        Assert.Equal(AyaRejectedPrefixCategory.NotApplicable, entries[0].Fields["PrefixCategory"]);
+        Assert.Equal(prefixCategory, entries[1].Fields["PrefixCategory"]);
+        foreach (var line in app.Logs.Entries.Concat(app.Logs.Events.SelectMany(e => e.Fields.Values).Select(v => v?.ToString() ?? ""))) {
             Assert.DoesNotContain(Private, line);
             if (serviceBody["url"]?.Type == JTokenType.String && serviceBody.Value<string>("url") is string url) Assert.DoesNotContain(url, line);
             if (serviceBody["requestId"] != null) Assert.DoesNotContain(serviceBody.Value<string>("requestId"), line);
@@ -128,7 +179,13 @@ public sealed class ResponseValidationDiagnosticTests
         var id = result.Value<string>("id"); Assert.NotNull(id);
         var state = JObject.Parse(await client.GetStringAsync("/api/request-status?id=" + id)).Value<string>("status");
         Assert.Equal(status == 200 ? "request_created" : "outcome_unknown", state);
-        if (status != 200) Assert.Equal(error, result.Value<string>("error"));
+        if (status != 200) {
+            Assert.Equal(error, result.Value<string>("error"));
+            Assert.Equal(new[] { "error", "id" }, result.Properties().Select(p => p.Name).ToArray());
+            Assert.DoesNotContain(Private, result.ToString());
+            if (serviceBody["url"]?.Type == JTokenType.String && serviceBody.Value<string>("url") is string rejectedUrl)
+                Assert.DoesNotContain(rejectedUrl, result.ToString());
+        }
         app.Logs.Events.Clear(); app.Logs.Entries.Clear();
         var duplicate = await IssuanceTests.Issue(client);
         Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
