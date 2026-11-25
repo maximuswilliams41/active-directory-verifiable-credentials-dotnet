@@ -9,7 +9,7 @@ Microsoft request ID and callback state. Response JSON and HTTP status behavior
 are unchanged; the response header is the only new client-visible diagnostic.
 
 The event has exactly these structured fields: `IssuanceCorrelationId`,
-`ReasonCode`, `Stage`, `HttpStatus`, `ServiceHttpStatus`, `ValidationReason` (plus the logger's fixed
+`ReasonCode`, `Stage`, `HttpStatus`, `ServiceHttpStatus`, `ValidationReason`, `PrefixCategory` (plus the logger's fixed
 message template). `Started` is Information level, with no HTTP statuses yet.
 The terminal event is Warning for unsuccessful responses and Information for 200.
 Reasons and stages are closed enums. No exception object/message, payload, header,
@@ -65,7 +65,8 @@ issuance attempt. Use only after the owner separately approves that pilot test.
    the response status and response header `X-Aya-Issuance-Correlation-ID`.
    Do not replay the request or export a HAR, cookies, bodies, tokens, PIN or QR.
 4. Find that exact correlation ID in Log stream. Record the UTC time, fixed reason,
-   stage, application HTTP status and service HTTP status (if any). These values
+   stage, application HTTP status, service HTTP status (if any), `ValidationReason`
+   and `PrefixCategory`. These values
    are sufficient to identify the failing boundary without sharing employee data.
 5. Stop after an unsuccessful result. A subsequent 409 has its own correlation
    ID and cannot explain the preceding failure. Do not retry automatically or
@@ -116,7 +117,7 @@ attributed to these checks, not that credential issuance completed.
 | `ExpiryMissing`, `ExpiryNotInteger`, `ExpiryOutOfRange` | Missing expiry, existing Int64 parsing, or Unix-seconds conversion range |
 
 For a separately approved future test, capture the same correlation header and
-fixed event fields described above, adding only `ValidationReason`. Do not capture
+fixed event fields described above, including `ValidationReason` and `PrefixCategory`. Do not capture
 or share the URL, request ID, body, QR, PIN, token, exception or employee fields.
 A failure during unknown-state recording can instead produce `StorageUnavailable`
 at `OutcomeRecording`; `ValidationReason` then retains the preceding check detail.
@@ -151,3 +152,33 @@ It does not establish which URL/expiry predicate failed, nor demonstrate callbac
 reachability or successful credential issuance. Request-ID binding and callback
 correlation cannot be the direct cause of that specific event. No compatibility
 relaxation is included in this diagnostic-only change.
+
+### Rejected issuance prefix category
+
+`PrefixCategory` is one closed enum on the existing event, never a URL fragment.
+It is populated only after the issuance validator returns `UrlPrefixRejected`.
+Exact, case-sensitive ordinal matching includes the query delimiter:
+
+| PrefixCategory | Fixed structural match |
+| --- | --- |
+| `NotApplicable` | Started event or any path without an issuance prefix rejection |
+| `OpenIdVcSlashQuery` | Starts exactly with `openid://vc/?` |
+| `OpenIdVcSchemeQuery` | Starts exactly with `openid-vc://?` |
+| `Other` | Any other rejected prefix; no input characters are recorded |
+
+The two recognized variants remain rejected. Classification does not parse the
+query, validate the destination, or imply that a link is safe to accept. Length
+and missing-value checks still precede prefix validation. If recording the
+uncertain outcome fails, the category retains the preceding prefix-rejection
+detail, just like `ValidationReason`. Response bodies, retention, duplicate
+protection, presentation validation and all URL acceptance rules are unchanged.
+
+Owner gate: review and approve merge/deployment separately; keep both activation
+flags disabled until a separately approved synthetic test. Confirm the deployed
+revision and the existing flags-off populated-ledger result before one normal
+portal attempt with the already approved synthetic identity and unchanged role,
+tenant, object-ID and registry restrictions. Record only the generated correlation
+ID, UTC time and fixed event fields above. Do not capture a URL, body or prefix
+sample, including when the category is `Other`. Stop on failure, preserve existing
+requests, and return issuance to disabled; verification stays disabled. This
+category is evidence for a later review, not approval to relax URL validation.

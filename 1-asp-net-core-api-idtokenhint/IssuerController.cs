@@ -151,6 +151,8 @@ public async Task<ActionResult> IssuanceRequest()
                 finally { diagnostic.ValidationReason = linkReason; }
                 if (!linkValid)
                 {
+                    if (linkReason == AyaResponseValidationReason.UrlPrefixRejected)
+                        diagnostic.PrefixCategory = AyaRequestLinks.ClassifyRejectedIssuancePrefix(url);
                     MarkUnknown(); diagnostic.Stage = AyaIssuanceStage.ResponseValidation;
                     return Done(AyaIssuanceReason.ResponseValidationFailed, 502, StatusCode(502, new { error = "invalid_service_response", id = pendingId }));
                 }

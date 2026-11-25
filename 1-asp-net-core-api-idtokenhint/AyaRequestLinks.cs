@@ -11,8 +11,22 @@ namespace AspNetCoreVerifiableCredentials
         ExpiryMissing, ExpiryNotInteger, ExpiryOutOfRange
     }
 
+    public enum AyaRejectedPrefixCategory
+    {
+        NotApplicable, OpenIdVcSlashQuery, OpenIdVcSchemeQuery, Other
+    }
+
     public static class AyaRequestLinks
     {
+        // Diagnostic only: call after the issuance validator returns UrlPrefixRejected.
+        // Match only complete fixed prefixes, including the query delimiter; never return input.
+        internal static AyaRejectedPrefixCategory ClassifyRejectedIssuancePrefix(string url)
+        {
+            if (url.StartsWith("openid://vc/?", StringComparison.Ordinal)) return AyaRejectedPrefixCategory.OpenIdVcSlashQuery;
+            if (url.StartsWith("openid-vc://?", StringComparison.Ordinal)) return AyaRejectedPrefixCategory.OpenIdVcSchemeQuery;
+            return AyaRejectedPrefixCategory.Other;
+        }
+
         public static bool Valid(string url, string kind) => Valid(url, kind, out _);
 
         // Same predicates and short-circuit order as the original validator. The reason is
